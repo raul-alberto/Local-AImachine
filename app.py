@@ -276,7 +276,7 @@ def append_sources_to_response(formatted_response, sources):
         for src in sources
     )
     sources_html = (
-        '<div class="mt-3"><p><strong>Sources</strong></p>'
+        '<div class="message-sources"><p><strong>Sources</strong></p>'
         f'<ul>{items}</ul></div>'
     )
     return formatted_response + sources_html
@@ -599,7 +599,7 @@ def chat():
     chats = session.get('chats', [])
     current_chat_index = session.get('current_chat_index', -1)
     if not chats:
-        chats.append({'title': 'New Chat', 'messages': [{'type': 'ai', 'message': 'Welcome to Court! I\'m your local AI assistant. How can I help you today?', 'sources': []}]})
+        chats.append({'title': 'New Chat', 'messages': []})
         current_chat_index = 0
         session['chats'] = chats
         session['current_chat_index'] = current_chat_index

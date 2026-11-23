@@ -1,364 +1,114 @@
 <!doctype html>
-<html lang="en" {% if initial_theme and initial_theme != 'crimson' %}data-theme="{{ initial_theme }}"{% endif %}>
+<html
+  lang="en"
+  {% if initial_theme and initial_theme != 'crimson' %}data-theme="{{ initial_theme }}"{% endif %}
+>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Login - Court</title>
-    <style>
-      {% set theme = initial_theme|default('crimson') %}
-      :root {
-        --brand-300: #fca5a5;
-        --brand-400: #f87171;
-        --brand-600: #dc2626;
-        --brand-700: #b91c1c;
-        --brand-soft: rgba(255, 0, 0, 0.22);
-        --accent: rgba(230, 0, 0, 0.18);
-        --page-gradient: linear-gradient(135deg, #090909 0%, #220000 100%);
-      }
-      {% if theme == 'purple' %}
-      :root {
-        --brand-300: #c4b5fd;
-        --brand-400: #a78bfa;
-        --brand-600: #7c3aed;
-        --brand-700: #6d28d9;
-        --brand-soft: rgba(109, 40, 217, 0.22);
-        --accent: rgba(124, 58, 237, 0.2);
-        --page-gradient: linear-gradient(135deg, #0b0319 0%, #220b47 100%);
-      }
-      {% elif theme == 'pink' %}
-      :root {
-        --brand-300: #f9a8d4;
-        --brand-400: #f472b6;
-        --brand-600: #db2777;
-        --brand-700: #be185d;
-        --brand-soft: rgba(190, 24, 93, 0.22);
-        --accent: rgba(236, 72, 153, 0.2);
-        --page-gradient: linear-gradient(135deg, #16040e 0%, #3e0a25 100%);
-      }
-      {% elif theme == 'black' %}
-      :root {
-        --brand-300: #9ca3af;
-        --brand-400: #6b7280;
-        --brand-600: #374151;
-        --brand-700: #1f2937;
-        --brand-soft: rgba(31, 41, 55, 0.24);
-        --accent: rgba(75, 85, 99, 0.2);
-        --page-gradient: linear-gradient(135deg, #050505 0%, #181818 100%);
-      }
-      {% elif theme == 'blue' %}
-      :root {
-        --brand-300: #93c5fd;
-        --brand-400: #60a5fa;
-        --brand-600: #2563eb;
-        --brand-700: #1d4ed8;
-        --brand-soft: rgba(29, 78, 216, 0.22);
-        --accent: rgba(59, 130, 246, 0.2);
-        --page-gradient: linear-gradient(135deg, #031022 0%, #0a2c63 100%);
-      }
-      {% elif theme == 'emerald' %}
-      :root {
-        --brand-300: #6ee7b7;
-        --brand-400: #34d399;
-        --brand-600: #059669;
-        --brand-700: #047857;
-        --brand-soft: rgba(4, 120, 87, 0.22);
-        --accent: rgba(16, 185, 129, 0.2);
-        --page-gradient: linear-gradient(135deg, #02120d 0%, #0a3f2f 100%);
-      }
-      {% elif theme == 'orange' %}
-      :root {
-        --brand-300: #fdba74;
-        --brand-400: #fb923c;
-        --brand-600: #ea580c;
-        --brand-700: #c2410c;
-        --brand-soft: rgba(194, 65, 12, 0.22);
-        --accent: rgba(249, 115, 22, 0.2);
-        --page-gradient: linear-gradient(135deg, #140902 0%, #4a220a 100%);
-      }
-      {% endif %}
-      [data-theme='purple'] {
-        --brand-300: #c4b5fd;
-        --brand-400: #a78bfa;
-        --brand-600: #7c3aed;
-        --brand-700: #6d28d9;
-        --brand-soft: rgba(109, 40, 217, 0.22);
-        --accent: rgba(124, 58, 237, 0.2);
-        --page-gradient: linear-gradient(135deg, #0b0319 0%, #220b47 100%);
-      }
-      [data-theme='pink'] {
-        --brand-300: #f9a8d4;
-        --brand-400: #f472b6;
-        --brand-600: #db2777;
-        --brand-700: #be185d;
-        --brand-soft: rgba(190, 24, 93, 0.22);
-        --accent: rgba(236, 72, 153, 0.2);
-        --page-gradient: linear-gradient(135deg, #16040e 0%, #3e0a25 100%);
-      }
-      [data-theme='black'] {
-        --brand-300: #9ca3af;
-        --brand-400: #6b7280;
-        --brand-600: #374151;
-        --brand-700: #1f2937;
-        --brand-soft: rgba(31, 41, 55, 0.24);
-        --accent: rgba(75, 85, 99, 0.2);
-        --page-gradient: linear-gradient(135deg, #050505 0%, #181818 100%);
-      }
-      [data-theme='blue'] {
-        --brand-300: #93c5fd;
-        --brand-400: #60a5fa;
-        --brand-600: #2563eb;
-        --brand-700: #1d4ed8;
-        --brand-soft: rgba(29, 78, 216, 0.22);
-        --accent: rgba(59, 130, 246, 0.2);
-        --page-gradient: linear-gradient(135deg, #031022 0%, #0a2c63 100%);
-      }
-      [data-theme='emerald'] {
-        --brand-300: #6ee7b7;
-        --brand-400: #34d399;
-        --brand-600: #059669;
-        --brand-700: #047857;
-        --brand-soft: rgba(4, 120, 87, 0.22);
-        --accent: rgba(16, 185, 129, 0.2);
-        --page-gradient: linear-gradient(135deg, #02120d 0%, #0a3f2f 100%);
-      }
-      [data-theme='orange'] {
-        --brand-300: #fdba74;
-        --brand-400: #fb923c;
-        --brand-600: #ea580c;
-        --brand-700: #c2410c;
-        --brand-soft: rgba(194, 65, 12, 0.22);
-        --accent: rgba(249, 115, 22, 0.2);
-        --page-gradient: linear-gradient(135deg, #140902 0%, #4a220a 100%);
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-        min-height: 100vh;
-        font-family:
-          Inter,
-          ui-sans-serif,
-          system-ui,
-          -apple-system,
-          BlinkMacSystemFont,
-          "Segoe UI",
-          sans-serif;
-        background:
-          radial-gradient(
-            circle at top left,
-            var(--accent),
-            transparent 28%
-          ),
-          var(--page-gradient);
-        color: #f8f8f8;
-      }
-
-      body {
-        display: grid;
-        place-items: center;
-        padding: 1.5rem;
-      }
-
-      .page-shell {
-        width: 100%;
-        max-width: 460px;
-      }
-
-      .login-card {
-        width: 100%;
-        background: rgba(8, 8, 8, 0.98);
-        border: 1px solid var(--brand-soft);
-        border-radius: 1.25rem;
-        box-shadow: 0 32px 120px rgba(0, 0, 0, 0.45);
-        padding: 2rem;
-        backdrop-filter: blur(18px);
-      }
-
-      .login-brand {
-        text-align: center;
-        margin-bottom: 1.75rem;
-      }
-
-      .login-brand img {
-        width: 80px;
-        height: 80px;
-        border-radius: 999px;
-        border: 2px solid var(--brand-400);
-        object-fit: cover;
-        margin-bottom: 1rem;
-      }
-
-      .login-brand h1 {
-        margin: 0;
-        font-size: 2rem;
-        letter-spacing: 0.04em;
-        color: var(--brand-300);
-      }
-
-      .login-brand p {
-        margin: 0.6rem auto 0;
-        color: #b9b9b9;
-        max-width: 84%;
-        line-height: 1.6;
-      }
-
-      .form-group {
-        margin-bottom: 1.25rem;
-      }
-
-      label {
-        display: block;
-        font-size: 0.95rem;
-        margin-bottom: 0.45rem;
-        color: var(--brand-300);
-      }
-
-      input {
-        width: 100%;
-        padding: 1rem 1rem;
-        border-radius: 0.95rem;
-        border: 1px solid var(--brand-soft);
-        background: rgba(30, 30, 30, 0.95);
-        color: #fff;
-        font-size: 1rem;
-      }
-
-      input:focus {
-        outline: none;
-        border-color: var(--brand-400);
-        box-shadow: 0 0 0 4px rgba(255, 59, 59, 0.14);
-      }
-
-      button {
-        width: 100%;
-        padding: 1rem 1rem;
-        border: none;
-        border-radius: 1rem;
-        background: linear-gradient(135deg, var(--brand-600) 0%, var(--brand-700) 100%);
-        color: white;
-        font-size: 1rem;
-        font-weight: 700;
-        cursor: pointer;
-        transition:
-          transform 0.2s ease,
-          box-shadow 0.2s ease,
-          background 0.2s ease;
-      }
-
-      button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 18px 40px rgba(217, 62, 62, 0.24);
-        background: linear-gradient(135deg, var(--brand-400) 0%, var(--brand-700) 100%);
-      }
-
-      .feedback {
-        margin-top: 1.2rem;
-        text-align: center;
-        color: #ff7474;
-      }
-
-      .hint {
-        margin-top: 1.5rem;
-        text-align: center;
-        color: #9c9c9c;
-        font-size: 0.95rem;
-        line-height: 1.5;
-      }
-
-      .hint strong {
-        color: #f3f3f3;
-      }
-    </style>
+    <meta name="color-scheme" content="dark" />
+    <title>Sign in - Court</title>
+    <link
+      rel="icon"
+      href="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
   </head>
-  <body>
-    <div class="page-shell">
-      <div class="login-card">
-        <div class="login-brand">
+  <body class="auth-body">
+    <main class="auth-shell">
+      <aside class="auth-aside">
+        <span class="eyebrow">Private · Offline · Yours</span>
+        <h2>Your AI runs <em>entirely</em> on your machine.</h2>
+        <p>
+          Court talks to a local Ollama model. No cloud account, no telemetry,
+          no tracking — just a fast assistant that never leaves your computer.
+        </p>
+        <ul class="feature-list">
+          <li>Local inference through Ollama</li>
+          <li>Chats saved on this device only</li>
+          <li>Search your own documents with local RAG</li>
+          <li>Streaming answers with stop control</li>
+        </ul>
+      </aside>
+
+      <section class="auth-card">
+        <div class="auth-brand">
           <img
             src="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
-            alt="Court Logo"
-            width="80"
-            height="80"
+            alt="Court logo"
+            width="44"
+            height="44"
           />
-          <h1>Welcome to Court</h1>
-          <p>Offline local AI access. Login to continue in secure mode.</p>
+          <div>
+            <h1>Welcome back</h1>
+            <p>Sign in to continue to Court</p>
+          </div>
         </div>
 
-        <form method="post">
-          <div class="form-group">
+        <form method="post" class="auth-form">
+          <div class="field">
             <label for="username">Username</label>
             <input
+              class="input"
               type="text"
               id="username"
               name="username"
+              placeholder="your username"
               required
               autocomplete="username"
+              autofocus
             />
           </div>
 
-          <div class="form-group">
+          <div class="field">
             <label for="password">Password</label>
             <input
+              class="input"
               type="password"
               id="password"
               name="password"
+              placeholder="••••••••"
               required
               autocomplete="current-password"
             />
           </div>
 
-          <button type="submit">
-            Login
+          <button class="btn btn-primary btn-block" type="submit">
+            Sign in
           </button>
         </form>
 
         {% with messages = get_flashed_messages() %} {% if messages %}
-        <div class="feedback">{{ messages[0] }}</div>
+        <div class="auth-feedback">{{ messages[0] }}</div>
         {% endif %} {% endwith %}
 
-        <div class="hint">
-          No internet required. Ollama runs locally and keeps your data private.
+        <div class="auth-foot">
+          New here?
+          <a href="{{ url_for('register') }}">Create a local account</a>
         </div>
-        <div class="hint" style="margin-top: 0.75rem">
-          Need a new local account?
-          <a
-            href="{{ url_for('register') }}"
-            style="color: var(--brand-300); text-decoration: none; font-weight: 600"
-            >Create account</a
-          >
-        </div>
-      </div>
-    </div>
+      </section>
+    </main>
+
     <script>
       (() => {
-        const serverTheme = '{{ initial_theme|default("crimson") }}';
-        const theme = serverTheme || localStorage.getItem('court_theme') || 'crimson';
-        const palettes = {
-          crimson: { brand300: '#fca5a5', brand400: '#f87171', brand600: '#dc2626', brand700: '#b91c1c', soft: 'rgba(255, 0, 0, 0.22)', accent: 'rgba(230, 0, 0, 0.18)', gradient: 'linear-gradient(135deg, #090909 0%, #220000 100%)' },
-          purple: { brand300: '#c4b5fd', brand400: '#a78bfa', brand600: '#7c3aed', brand700: '#6d28d9', soft: 'rgba(109, 40, 217, 0.22)', accent: 'rgba(124, 58, 237, 0.2)', gradient: 'linear-gradient(135deg, #0b0319 0%, #220b47 100%)' },
-          pink: { brand300: '#f9a8d4', brand400: '#f472b6', brand600: '#db2777', brand700: '#be185d', soft: 'rgba(190, 24, 93, 0.22)', accent: 'rgba(236, 72, 153, 0.2)', gradient: 'linear-gradient(135deg, #16040e 0%, #3e0a25 100%)' },
-          black: { brand300: '#9ca3af', brand400: '#6b7280', brand600: '#374151', brand700: '#1f2937', soft: 'rgba(31, 41, 55, 0.24)', accent: 'rgba(75, 85, 99, 0.2)', gradient: 'linear-gradient(135deg, #050505 0%, #181818 100%)' },
-          blue: { brand300: '#93c5fd', brand400: '#60a5fa', brand600: '#2563eb', brand700: '#1d4ed8', soft: 'rgba(29, 78, 216, 0.22)', accent: 'rgba(59, 130, 246, 0.2)', gradient: 'linear-gradient(135deg, #031022 0%, #0a2c63 100%)' },
-          emerald: { brand300: '#6ee7b7', brand400: '#34d399', brand600: '#059669', brand700: '#047857', soft: 'rgba(4, 120, 87, 0.22)', accent: 'rgba(16, 185, 129, 0.2)', gradient: 'linear-gradient(135deg, #02120d 0%, #0a3f2f 100%)' },
-          orange: { brand300: '#fdba74', brand400: '#fb923c', brand600: '#ea580c', brand700: '#c2410c', soft: 'rgba(194, 65, 12, 0.22)', accent: 'rgba(249, 115, 22, 0.2)', gradient: 'linear-gradient(135deg, #140902 0%, #4a220a 100%)' },
-        };
-        const palette = palettes[theme] || palettes.crimson;
-        if (theme && theme !== 'crimson') {
+        const allowed = ['crimson', 'purple', 'pink', 'black', 'blue', 'emerald', 'orange'];
+        let theme = '{{ initial_theme|default("crimson") }}';
+        try {
+          theme = localStorage.getItem('court_theme') || theme;
+        } catch (error) {
+          /* storage may be unavailable in private browsing */
+        }
+        if (allowed.includes(theme) && theme !== 'crimson') {
           document.documentElement.setAttribute('data-theme', theme);
         }
-        document.documentElement.style.setProperty('--brand-300', palette.brand300);
-        document.documentElement.style.setProperty('--brand-400', palette.brand400);
-        document.documentElement.style.setProperty('--brand-600', palette.brand600);
-        document.documentElement.style.setProperty('--brand-700', palette.brand700);
-        document.documentElement.style.setProperty('--brand-soft', palette.soft);
-        document.documentElement.style.setProperty('--accent', palette.accent);
-        document.documentElement.style.setProperty('--page-gradient', palette.gradient);
-        localStorage.setItem('court_theme', theme);
+        try {
+          localStorage.setItem('court_theme', theme);
+        } catch (error) {
+          /* ignore */
+        }
       })();
     </script>
   </body>

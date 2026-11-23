@@ -8,9 +8,9 @@ Created by **Nox**.
 
 - Local AI processing using Ollama
 - Local account system with register/login (SQLite + hashed passwords)
-- Beautiful black-red dark theme UI with Tailwind CSS
+- Dark, responsive UI built on one shared stylesheet (`static/style.css`) with seven switchable color themes
 - ChatGPT-like interface with sidebar chat history
-- Profile card with model and local health status
+- Model name and live Ollama health status in the header
 - Streaming responses with stop/cancel control
 - Advanced generation controls (preset, temperature, top_p, top_k, max tokens)
 - Local RAG knowledge base (upload files, retrieve context, cite sources)
@@ -18,9 +18,8 @@ Created by **Nox**.
 - Privacy mode toggle (ephemeral vs persistent chats)
 - One-click local data wipe per account
 - Animated loading indicators with custom logo
-- Formatted AI responses with code highlighting
+- Markdown-formatted AI responses with offline syntax highlighting (bundled highlight.js) and copy buttons
 - FAQs page
-- Temporary chat history (cleared on logout/server restart)
 
 ## What You Need
 
@@ -202,8 +201,8 @@ Use this workflow to reduce false refusals while preserving refusals for clearly
 ## Local RAG Quick Start
 
 1. Open Settings in chat.
-2. In `Local Knowledge (RAG)`, enable retrieval.
-3. Upload a local file (`.txt`, `.md`, `.py`, `.json`, `.csv`, `.html`, `.js`, `.css`, `.pdf`).
+2. In `Local knowledge`, tick `Enable document retrieval in chat responses`.
+3. Index a local file (`.txt`, `.md`, `.py`, `.json`, `.csv`, `.html`, `.js`, `.css`, `.pdf`).
 4. Ask a question related to the uploaded content.
 5. Court will include a `Sources` section when context is used.
 6. Use `View sources` on AI messages to inspect matched snippets.
@@ -236,8 +235,9 @@ To create a local Windows package and installer:
 ## Project Structure
 
 - `app.py`: Main Flask application
-- `templates/`: HTML templates (login, chat, faqs)
-- `static/`: CSS, JS, and image assets
+- `templates/`: HTML templates (login, register, chat, faqs)
+- `static/`: shared stylesheet (`style.css`) and image assets; page JavaScript lives inline in the templates
+- `static/vendor/`: bundled highlight.js 11.11.1 build and GitHub Dark theme (BSD-3-Clause), loaded by `chat.html` so highlighting works fully offline
 - `requirements.txt`: Python dependencies
 
 ## Usage
@@ -245,6 +245,6 @@ To create a local Windows package and installer:
 - Start new chats from the sidebar
 - View chat history in the left panel
 - Access FAQs for more information
-- AI responses are automatically formatted with code blocks and syntax highlighting
+- AI responses are rendered from Markdown, with syntax-highlighted code blocks and a copy button
 
 Enjoy your creative AI companion!

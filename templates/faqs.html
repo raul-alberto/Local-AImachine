@@ -1,225 +1,139 @@
 <!doctype html>
-<html lang="en" {% if initial_theme and initial_theme != 'crimson' %}data-theme="{{ initial_theme }}"{% endif %}>
+<html
+  lang="en"
+  {% if initial_theme and initial_theme != 'crimson' %}data-theme="{{ initial_theme }}"{% endif %}
+>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
     <title>FAQs - Court</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-      {% set theme = initial_theme|default('crimson') %}
-      :root {
-        --brand-300: #fca5a5;
-        --brand-400: #f87171;
-        --brand-700: #b91c1c;
-        --page-gradient: linear-gradient(135deg, #000000 0%, #330000 100%);
-      }
-      {% if theme == 'purple' %}
-      :root {
-        --brand-300: #c4b5fd;
-        --brand-400: #a78bfa;
-        --brand-700: #6d28d9;
-        --page-gradient: linear-gradient(135deg, #0b0319 0%, #220b47 100%);
-      }
-      {% elif theme == 'pink' %}
-      :root {
-        --brand-300: #f9a8d4;
-        --brand-400: #f472b6;
-        --brand-700: #be185d;
-        --page-gradient: linear-gradient(135deg, #16040e 0%, #3e0a25 100%);
-      }
-      {% elif theme == 'black' %}
-      :root {
-        --brand-300: #9ca3af;
-        --brand-400: #6b7280;
-        --brand-700: #1f2937;
-        --page-gradient: linear-gradient(135deg, #050505 0%, #181818 100%);
-      }
-      {% elif theme == 'blue' %}
-      :root {
-        --brand-300: #93c5fd;
-        --brand-400: #60a5fa;
-        --brand-700: #1d4ed8;
-        --page-gradient: linear-gradient(135deg, #031022 0%, #0a2c63 100%);
-      }
-      {% elif theme == 'emerald' %}
-      :root {
-        --brand-300: #6ee7b7;
-        --brand-400: #34d399;
-        --brand-700: #047857;
-        --page-gradient: linear-gradient(135deg, #02120d 0%, #0a3f2f 100%);
-      }
-      {% elif theme == 'orange' %}
-      :root {
-        --brand-300: #fdba74;
-        --brand-400: #fb923c;
-        --brand-700: #c2410c;
-        --page-gradient: linear-gradient(135deg, #140902 0%, #4a220a 100%);
-      }
-      {% endif %}
-      [data-theme='purple'] {
-        --brand-300: #c4b5fd;
-        --brand-400: #a78bfa;
-        --brand-700: #6d28d9;
-        --page-gradient: linear-gradient(135deg, #0b0319 0%, #220b47 100%);
-      }
-      [data-theme='pink'] {
-        --brand-300: #f9a8d4;
-        --brand-400: #f472b6;
-        --brand-700: #be185d;
-        --page-gradient: linear-gradient(135deg, #16040e 0%, #3e0a25 100%);
-      }
-      [data-theme='black'] {
-        --brand-300: #9ca3af;
-        --brand-400: #6b7280;
-        --brand-700: #1f2937;
-        --page-gradient: linear-gradient(135deg, #050505 0%, #181818 100%);
-      }
-      [data-theme='blue'] {
-        --brand-300: #93c5fd;
-        --brand-400: #60a5fa;
-        --brand-700: #1d4ed8;
-        --page-gradient: linear-gradient(135deg, #031022 0%, #0a2c63 100%);
-      }
-      [data-theme='emerald'] {
-        --brand-300: #6ee7b7;
-        --brand-400: #34d399;
-        --brand-700: #047857;
-        --page-gradient: linear-gradient(135deg, #02120d 0%, #0a3f2f 100%);
-      }
-      [data-theme='orange'] {
-        --brand-300: #fdba74;
-        --brand-400: #fb923c;
-        --brand-700: #c2410c;
-        --page-gradient: linear-gradient(135deg, #140902 0%, #4a220a 100%);
-      }
-
-      body {
-        background: var(--page-gradient);
-        min-height: 100vh;
-        color: #ffffff;
-      }
-      .text-red-400 {
-        color: var(--brand-400) !important;
-      }
-      .text-red-300,
-      .hover\:text-red-300:hover {
-        color: var(--brand-300) !important;
-      }
-    </style>
+    <link
+      rel="icon"
+      href="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
   </head>
-  <body class="p-8">
-    <div class="max-w-4xl mx-auto">
-      <div class="flex items-center justify-between mb-8">
-        <div class="flex items-center">
+  <body>
+    <div class="doc-page">
+      <header class="doc-header">
+        <div class="doc-brand">
           <img
             src="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
-            alt="Court Logo"
-            class="w-12 h-12 rounded-full mr-4"
+            alt="Court logo"
+            width="42"
+            height="42"
           />
-          <h1 class="text-3xl font-bold">Court - FAQs</h1>
+          <div>
+            <h1>Court</h1>
+            <span>Help &amp; FAQs</span>
+          </div>
         </div>
-        <div>
-          <a
-            href="{{ url_for('chat') }}"
-            class="text-red-400 hover:text-red-300 mr-4"
-            >Back to Chat</a
+        <nav class="doc-nav">
+          <a class="btn btn-ghost btn-sm" href="{{ url_for('chat') }}"
+            >Back to chat</a
           >
-          <a
-            href="{{ url_for('logout') }}"
-            class="text-red-400 hover:text-red-300"
-            >Logout</a
+          <a class="btn btn-ghost btn-sm" href="{{ url_for('logout') }}"
+            >Log out</a
           >
-        </div>
-      </div>
+        </nav>
+      </header>
 
-      <div class="bg-black bg-opacity-50 p-6 rounded-lg mb-6">
-        <h2 class="text-2xl font-bold mb-4 text-red-400">About Court</h2>
-        <p class="mb-4">
-          Court is a local, uncensored AI assistant designed for creative
-          minds. It runs entirely on your machine, ensuring privacy and
-          security.
+      <section class="doc-hero">
+        <span class="eyebrow">About</span>
+        <h2>A private AI assistant that runs on your machine.</h2>
+        <p>
+          Court is a local, uncensored AI assistant for creative work, coding
+          and writing. It talks to Ollama on your own hardware, so prompts and
+          replies never leave your computer.
         </p>
-        <p class="mb-4">
-          This project was created by <strong>Nox</strong>, a passionate
-          developer focused on building tools that empower creativity without
-          compromising privacy.
-        </p>
+        <p class="muted">Built by Nox.</p>
+      </section>
+
+      <div class="faq-list">
+        <details class="faq-item" open>
+          <summary>What is Court?</summary>
+          <p>
+            Court is an AI companion that helps with creative ideas, coding,
+            writing and more. It is designed to be useful and unfiltered for
+            local, personal work.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Is my data safe?</summary>
+          <p>
+            Yes. Court runs locally through Ollama and sends nothing to external
+            servers. Accounts, chats and indexed documents live on this machine,
+            and you can wipe them at any time from Settings.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>How do I use it?</summary>
+          <p>
+            Type your question in the composer at the bottom of the chat and
+            press Enter. Replies stream in as they are generated, with code
+            blocks formatted and copyable. Use Stop to cancel a reply in
+            progress.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Can I start new conversations?</summary>
+          <p>
+            Yes. Use New chat in the sidebar. Each conversation is independent,
+            appears under Recent chats, and can be renamed, tagged or deleted
+            from its ⋯ menu.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>How does local document search work?</summary>
+          <p>
+            Open Settings and index text, code or PDF files under Local
+            knowledge. When retrieval is enabled, Court pulls the most relevant
+            passages into the prompt and cites them under each answer with View
+            sources.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>What does ephemeral mode mean?</summary>
+          <p>
+            In Ephemeral privacy mode, chats stay in your session only and are
+            cleared when you log out. Persistent mode keeps them for your
+            account on this device.
+          </p>
+        </details>
       </div>
 
-      <div class="space-y-6">
-        <div class="bg-black bg-opacity-50 p-6 rounded-lg">
-          <h3 class="text-xl font-bold mb-2 text-red-400">
-            What is Court?
-          </h3>
-          <p>
-            Court is an AI companion that helps you with creative ideas,
-            coding, writing, and more. It's designed to be uncensored and
-            helpful for all kinds of tasks.
-          </p>
-        </div>
-
-        <div class="bg-black bg-opacity-50 p-6 rounded-lg">
-          <h3 class="text-xl font-bold mb-2 text-red-400">Is my data safe?</h3>
-          <p>
-            Yes! Court runs locally on your machine using Ollama. No data is
-            sent to external servers, and chat history is only stored
-            temporarily in your browser session.
-          </p>
-        </div>
-
-        <div class="bg-black bg-opacity-50 p-6 rounded-lg">
-          <h3 class="text-xl font-bold mb-2 text-red-400">How do I use it?</h3>
-          <p>
-            Simply type your questions or requests in the chat interface. Court
-            will respond with helpful, formatted answers including code
-            blocks when appropriate.
-          </p>
-        </div>
-
-        <div class="bg-black bg-opacity-50 p-6 rounded-lg">
-          <h3 class="text-xl font-bold mb-2 text-red-400">
-            Can I start new conversations?
-          </h3>
-          <p>
-            Yes, you can start new chats from the sidebar. Each conversation is
-            independent, and you can switch between them easily.
-          </p>
-        </div>
-
-        <div class="bg-black bg-opacity-50 p-6 rounded-lg">
-          <h3 class="text-xl font-bold mb-2 text-red-400">
-            Enjoy using Court!
-          </h3>
-          <p>
-            Have fun exploring your creativity with Court. Whether you're
-            coding, writing, or brainstorming ideas, Court is here to help you
-            build amazing things.
-          </p>
-        </div>
-      </div>
+      <footer class="doc-footer">
+        Court is local software — responses come from the model installed on
+        your machine and can be inaccurate.
+      </footer>
     </div>
+
     <script>
       (() => {
-        const serverTheme = '{{ initial_theme|default("crimson") }}';
-        const theme = serverTheme || localStorage.getItem('court_theme') || 'crimson';
-        const palettes = {
-          crimson: { brand300: '#fca5a5', brand400: '#f87171', brand700: '#b91c1c', gradient: 'linear-gradient(135deg, #000000 0%, #330000 100%)' },
-          purple: { brand300: '#c4b5fd', brand400: '#a78bfa', brand700: '#6d28d9', gradient: 'linear-gradient(135deg, #0b0319 0%, #220b47 100%)' },
-          pink: { brand300: '#f9a8d4', brand400: '#f472b6', brand700: '#be185d', gradient: 'linear-gradient(135deg, #16040e 0%, #3e0a25 100%)' },
-          black: { brand300: '#9ca3af', brand400: '#6b7280', brand700: '#1f2937', gradient: 'linear-gradient(135deg, #050505 0%, #181818 100%)' },
-          blue: { brand300: '#93c5fd', brand400: '#60a5fa', brand700: '#1d4ed8', gradient: 'linear-gradient(135deg, #031022 0%, #0a2c63 100%)' },
-          emerald: { brand300: '#6ee7b7', brand400: '#34d399', brand700: '#047857', gradient: 'linear-gradient(135deg, #02120d 0%, #0a3f2f 100%)' },
-          orange: { brand300: '#fdba74', brand400: '#fb923c', brand700: '#c2410c', gradient: 'linear-gradient(135deg, #140902 0%, #4a220a 100%)' },
-        };
-        const palette = palettes[theme] || palettes.crimson;
-        if (theme && theme !== 'crimson') {
+        const allowed = ['crimson', 'purple', 'pink', 'black', 'blue', 'emerald', 'orange'];
+        let theme = '{{ initial_theme|default("crimson") }}';
+        try {
+          theme = localStorage.getItem('court_theme') || theme;
+        } catch (error) {
+          /* storage may be unavailable in private browsing */
+        }
+        if (allowed.includes(theme) && theme !== 'crimson') {
           document.documentElement.setAttribute('data-theme', theme);
         }
-        document.documentElement.style.setProperty('--brand-300', palette.brand300);
-        document.documentElement.style.setProperty('--brand-400', palette.brand400);
-        document.documentElement.style.setProperty('--brand-700', palette.brand700);
-        document.documentElement.style.setProperty('--page-gradient', palette.gradient);
-        localStorage.setItem('court_theme', theme);
+        try {
+          localStorage.setItem('court_theme', theme);
+        } catch (error) {
+          /* ignore */
+        }
       })();
     </script>
   </body>
