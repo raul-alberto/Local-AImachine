@@ -1,10 +1,12 @@
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash, make_response, Response, stream_with_context
+import argparse
 import requests
 import os
 import json
 import sqlite3
 import math
 import re
+import time
 import markdown
 import nh3
 from datetime import datetime
@@ -316,16 +318,11 @@ def init_user_db():
         conn.close()
 
 
-def ensure_default_admin_user():
+def has_any_user():
     conn = sqlite3.connect(USER_DB_FILE)
     try:
         row = conn.execute('SELECT COUNT(*) FROM users').fetchone()
-        if row and row[0] == 0:
-            conn.execute(
-                'INSERT INTO users (username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)',
-                ('admin', generate_password_hash('admin123'), 'Admin', datetime.utcnow().isoformat()),
-            )
-            conn.commit()
+        return bool(row and row[0])
     finally:
         conn.close()
 
@@ -554,13 +551,46 @@ def is_ollama_available():
     except Exception:
         return False, {}
 
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 900
+_login_failures = {}
+
+
+def login_lock_seconds(key):
+    entry = _login_failures.get(key)
+    return max(0, int(entry['locked_until'] - time.time())) if entry else 0
+
+
+def record_login_failure(key):
+    now = time.time()
+    entry = _login_failures.get(key)
+    if not entry or now - entry['first'] > LOGIN_WINDOW_SECONDS:
+        entry = {'count': 1, 'first': now, 'locked_until': 0}
+    else:
+        entry['count'] += 1
+    if entry['count'] >= LOGIN_MAX_ATTEMPTS:
+        # 60s on the fifth miss, doubling for each further miss (max 15 min).
+        lock = 60 * 2 ** (entry['count'] - LOGIN_MAX_ATTEMPTS)
+        entry['locked_until'] = now + min(lock, LOGIN_WINDOW_SECONDS)
+    _login_failures[key] = entry
+
+
 @app.route('/', methods=['GET', 'POST'])
 def login():
+    if not has_any_user():
+        flash('No account exists yet. Create the first one to start using Court.')
+        return redirect(url_for('register'))
     if request.method == 'POST':
         username = (request.form.get('username') or '').strip()
         password = request.form.get('password') or ''
+        attempt_key = f'{request.remote_addr or "local"}:{username.lower()}'
+        lock_seconds = login_lock_seconds(attempt_key)
+        if lock_seconds:
+            flash(f'Too many failed attempts. Try again in {lock_seconds} seconds.')
+            return render_template('login.html', initial_theme=get_preferred_theme()), 429
         user = get_user_by_username(username)
         if user and check_password_hash(user['password_hash'], password):
+            _login_failures.pop(attempt_key, None)
             session.clear()
             session['logged_in'] = True
             session['user_id'] = user['id']
@@ -581,6 +611,7 @@ def login():
             response = redirect(url_for('chat'))
             response.set_cookie('court_theme', normalize_theme(session['profile'].get('theme')), max_age=31536000)
             return response
+        record_login_failure(attempt_key)
         flash('Invalid credentials')
     return render_template('login.html', initial_theme=get_preferred_theme())
 
@@ -1179,8 +1210,28 @@ def search_messages():
 
 def main():
     init_user_db()
-    ensure_default_admin_user()
-    app.run(host='0.0.0.0', port=5000)
+    parser = argparse.ArgumentParser(description='Run Court locally.')
+    parser.add_argument(
+        '--host',
+        default=os.environ.get('COURT_HOST', '127.0.0.1'),
+        help='interface to listen on (default: 127.0.0.1)',
+    )
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=int(os.environ.get('COURT_PORT', '5000')),
+        help='port to listen on (default: 5000)',
+    )
+    parser.add_argument(
+        '--lan',
+        action='store_true',
+        help='listen on all interfaces so other devices on your network can connect',
+    )
+    args = parser.parse_args()
+    host = '0.0.0.0' if args.lan else args.host
+    if host not in ('127.0.0.1', 'localhost', '::1'):
+        print(f'Court is listening on {host}:{args.port}. Anyone who can reach that address can open the login page.')
+    app.run(host=host, port=args.port)
 
 
 if __name__ == '__main__':

@@ -7,7 +7,7 @@ Created by **Nox**.
 ## Features
 
 - Local AI processing using Ollama
-- Local account system with register/login (SQLite + hashed passwords)
+- Local account system with register/login (SQLite + hashed passwords, no default credentials)
 - Dark, responsive UI on one shared stylesheet with seven switchable color themes
 - ChatGPT-like interface with sidebar chat history
 - Model name and live Ollama health status in the header
@@ -81,11 +81,20 @@ The steps below are written for Windows PowerShell.
 
    Visit http://localhost:5000
 
-9. Sign in
+9. Create your account
 
-   - Username: admin
-   - Password: admin123
-   - Or create a new local account from the login page
+   Court ships no default credentials. On first launch it opens the
+   registration page: pick a username and a password of at least 8
+   characters, then sign in with them.
+
+## Network Access
+
+Court listens on `127.0.0.1:5000` by default, so only this computer can open it.
+
+- `python launcher.py --lan` (or `COURT_HOST=0.0.0.0`) also accepts connections from other devices on your network.
+- `--port` (or `COURT_PORT`) changes the port.
+
+Anyone who can reach an exposed instance sees the login page, and registration stays open, so use a strong password.
 
 ## Linux Quick Start (Ubuntu/Debian)
 
@@ -215,6 +224,7 @@ In Settings:
    - `Ephemeral`: chats stay in session only.
    - `Persistent`: chats are saved locally per user.
 2. Use `Wipe local data` to clear chats, indexed docs, and reset settings for the current account.
+3. Failed logins are throttled: after 5 misses from the same address and username within 15 minutes, sign-in is locked for 60 seconds, doubling on each further miss.
 
 ## Packaging
 
