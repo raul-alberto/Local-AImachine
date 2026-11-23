@@ -336,14 +336,6 @@ img {
 }
 
 .field > label,
-.field-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--faint);
-}
-
 .field-value {
   float: right;
   font-weight: 600;
@@ -1068,12 +1060,6 @@ input[type='checkbox'] {
   color: var(--faint);
 }
 
-.grid-2 {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.75rem;
-}
-
 .grid-3 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1265,30 +1251,6 @@ input[type='checkbox'] {
   margin-left: calc(30px + 0.65rem);
 }
 
-.message-sources {
-  margin-top: 0.9rem;
-  padding-top: 0.7rem;
-  border-top: 1px solid var(--line);
-}
-
-.message-sources p {
-  margin: 0 0 0.35rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--brand-300);
-}
-
-.message-sources ul {
-  margin: 0;
-  padding-left: 1.1rem;
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-
-.message-sources li {
-  margin: 0.2rem 0;
-}
-
 .sources-button {
   margin-top: 0.5rem;
   width: fit-content;
@@ -1394,6 +1356,26 @@ input[type='checkbox'] {
   border: none;
   border-radius: 0;
   color: #e8e6e3;
+}
+
+/* Appended to AI messages by append_sources_to_response(); must follow the
+   .message-content rules above so its tighter spacing wins. */
+.message-sources {
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+}
+
+.message-sources p {
+  margin: 0 0 0.35rem;
+  color: var(--brand-300);
+}
+
+.message-sources ul {
+  margin: 0;
+  padding-left: 1.1rem;
 }
 
 .copy-code-button {

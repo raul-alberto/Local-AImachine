@@ -8,7 +8,7 @@ Created by **Nox**.
 
 - Local AI processing using Ollama
 - Local account system with register/login (SQLite + hashed passwords)
-- Dark, responsive UI built on one shared stylesheet (`static/style.css`) with seven switchable color themes
+- Dark, responsive UI on one shared stylesheet with seven switchable color themes
 - ChatGPT-like interface with sidebar chat history
 - Model name and live Ollama health status in the header
 - Streaming responses with stop/cancel control
@@ -18,7 +18,7 @@ Created by **Nox**.
 - Privacy mode toggle (ephemeral vs persistent chats)
 - One-click local data wipe per account
 - Animated loading indicators with custom logo
-- Markdown-formatted AI responses with offline syntax highlighting (bundled highlight.js) and copy buttons
+- Markdown responses with offline syntax highlighting and copy buttons
 - FAQs page
 
 ## What You Need
@@ -236,8 +236,7 @@ To create a local Windows package and installer:
 
 - `app.py`: Main Flask application
 - `templates/`: HTML templates (login, register, chat, faqs)
-- `static/`: shared stylesheet (`style.css`) and image assets; page JavaScript lives inline in the templates
-- `static/vendor/`: bundled highlight.js 11.11.1 build and GitHub Dark theme (BSD-3-Clause), loaded by `chat.html` so highlighting works fully offline
+- `static/`: shared stylesheet, images, and the vendored highlight.js build and theme (`vendor/`, BSD-3-Clause) used for offline code highlighting
 - `requirements.txt`: Python dependencies
 
 ## Usage
@@ -245,6 +244,6 @@ To create a local Windows package and installer:
 - Start new chats from the sidebar
 - View chat history in the left panel
 - Access FAQs for more information
-- AI responses are rendered from Markdown, with syntax-highlighted code blocks and a copy button
+- AI responses render Markdown with syntax-highlighted code and a copy button
 
 Enjoy your creative AI companion!
