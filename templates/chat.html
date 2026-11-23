@@ -486,7 +486,7 @@
 
       function updateChatHistory() {
           const historyDiv = document.getElementById('chat-history');
-          historyDiv.innerHTML = '';
+          historyDiv.replaceChildren();
           chats.forEach((chat, index) => {
               const item = document.createElement('div');
               item.className = `chat-item ${index === currentChatIndex ? 'is-active' : ''}`;
@@ -624,7 +624,7 @@
 
       function renderChat() {
           const chatDiv = document.getElementById('chat');
-          chatDiv.innerHTML = '';
+          chatDiv.replaceChildren();
           if (currentChatIndex >= 0 && currentChatIndex < chats.length) {
               const chat = chats[currentChatIndex];
               chat.messages.forEach(msg => {
@@ -728,27 +728,37 @@
         }
 
         function renderRagDocumentList(documents) {
-          ragDocList.innerHTML = '';
-                      if (!documents.length) {
-            ragDocList.innerHTML = '<p class="status-line">No indexed documents yet.</p>';
+          ragDocList.replaceChildren();
+          if (!documents.length) {
+            const empty = document.createElement('p');
+            empty.className = 'status-line';
+            empty.textContent = 'No indexed documents yet.';
+            ragDocList.appendChild(empty);
             return;
           }
           documents.forEach((doc) => {
             const row = document.createElement('div');
             row.className = 'doc-row';
-            row.innerHTML = `
-              <div>
-                <div class="doc-name">${doc.name}</div>
-                <div class="doc-meta">${doc.chunks} chunks</div>
-              </div>
-              <div class="doc-actions">
-                <button type="button" class="btn btn-ghost btn-xs">Rename</button>
-                <button type="button" class="btn btn-ghost btn-xs">Delete</button>
-              </div>
-            `;
-            const buttons = row.querySelectorAll('button');
-            const renameButton = buttons[0];
-            const deleteButton = buttons[1];
+            const info = document.createElement('div');
+            const nameEl = document.createElement('div');
+            nameEl.className = 'doc-name';
+            nameEl.textContent = doc.name;
+            const metaEl = document.createElement('div');
+            metaEl.className = 'doc-meta';
+            metaEl.textContent = `${doc.chunks} chunks`;
+            info.append(nameEl, metaEl);
+            const actions = document.createElement('div');
+            actions.className = 'doc-actions';
+            const renameButton = document.createElement('button');
+            renameButton.type = 'button';
+            renameButton.className = 'btn btn-ghost btn-xs';
+            renameButton.textContent = 'Rename';
+            const deleteButton = document.createElement('button');
+            deleteButton.type = 'button';
+            deleteButton.className = 'btn btn-ghost btn-xs';
+            deleteButton.textContent = 'Delete';
+            actions.append(renameButton, deleteButton);
+            row.append(info, actions);
             renameButton.addEventListener('click', async () => {
               const updatedName = window.prompt('Rename document', doc.name);
               if (!updatedName) return;
@@ -848,8 +858,10 @@
             return;
           }
           activeStreamingTextDiv.style.whiteSpace = 'normal';
+          // Server-rendered Markdown from the stream's "done" packet, sanitized by
+          // sanitize_reply_html(); streamed chunks only ever went through textContent.
           activeStreamingTextDiv.innerHTML = finalHtml;
-          attachSourcesButton(activeStreamingBubble, sources || []);
+          attachSources(activeStreamingBubble, activeStreamingTextDiv, sources || []);
           addCopyButtons();
           hljs.highlightAll();
         }
@@ -914,7 +926,8 @@
                     updateChatHistory();
                   }
                 } else if (packet.type === 'error') {
-                  appendMessage(packet.message || 'Error: Unable to get response', 'ai');
+                  // Server error text is not Markdown, so render it as plain text.
+                  appendMessage(packet.message || 'Error: Unable to get response', 'ai', [], true);
                 }
               }
               }
@@ -954,7 +967,7 @@
               currentChatIndex = data.current_index;
               setSidebarOpen(false);
               updateChatHistory();
-              document.getElementById('chat').innerHTML = '';
+              document.getElementById('chat').replaceChildren();
               syncWelcome();
           }
       });
@@ -1189,7 +1202,7 @@
           }
       });
 
-        function appendMessage(text, type, sources = []) {
+        function appendMessage(text, type, sources = [], asPlainText = false) {
           const chat = document.getElementById('chat');
           const bubble = document.createElement('div');
           bubble.className = `msg-row msg-row--${type === 'ai' ? 'ai' : 'user'}`;
@@ -1200,18 +1213,42 @@
           }
           const textDiv = document.createElement('div');
           textDiv.className = `msg-bubble msg-bubble--${type === 'ai' ? 'ai' : 'user'} message-content`;
-          textDiv.innerHTML = text;
+          if (type === 'ai' && !asPlainText) {
+              // Only server-rendered Markdown reaches innerHTML, and
+              // sanitize_reply_html() has already stripped scripts and handlers.
+              textDiv.innerHTML = text;
+          } else {
+              textDiv.textContent = text;
+          }
           bubble.appendChild(textDiv);
-          attachSourcesButton(bubble, sources);
+          attachSources(bubble, textDiv, sources);
           chat.appendChild(bubble);
           chat.scrollTop = chat.scrollHeight;
           hljs.highlightAll();
           addCopyButtons();
       }
 
-          function attachSourcesButton(bubble, sources) {
+          function attachSources(bubble, contentDiv, sources) {
             if (!sources || !sources.length) return;
             if (bubble.querySelector('.sources-button')) return;
+
+            const block = document.createElement('div');
+            block.className = 'message-sources';
+            const heading = document.createElement('p');
+            const headingLabel = document.createElement('strong');
+            headingLabel.textContent = 'Sources';
+            heading.appendChild(headingLabel);
+            const list = document.createElement('ul');
+            sources.forEach((source) => {
+              const item = document.createElement('li');
+              const label = document.createElement('strong');
+              label.textContent = `[${source.id}] ${source.source}`;
+              item.append(label, `: ${source.snippet}`);
+              list.appendChild(item);
+            });
+            block.append(heading, list);
+            contentDiv.appendChild(block);
+
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'btn btn-ghost btn-xs sources-button';
@@ -1226,14 +1263,22 @@
           function showSourcesModal(sources) {
             const modal = document.getElementById('sources-modal');
             const content = document.getElementById('sources-content');
-            content.innerHTML = '';
+            content.replaceChildren();
             sources.forEach((source) => {
               const block = document.createElement('div');
               block.className = 'source-item';
-                const scoreLine = typeof source.score === 'number'
-                ? `<span class="source-score">Relevance ${source.score.toFixed(4)}</span>`
-                : '';
-                block.innerHTML = `<strong>[${source.id}] ${source.source}</strong>${scoreLine}<p>${source.snippet}</p>`;
+                const label = document.createElement('strong');
+                label.textContent = `[${source.id}] ${source.source}`;
+                block.appendChild(label);
+                if (typeof source.score === 'number') {
+                  const scoreEl = document.createElement('span');
+                  scoreEl.className = 'source-score';
+                  scoreEl.textContent = `Relevance ${source.score.toFixed(4)}`;
+                  block.appendChild(scoreEl);
+                }
+                const snippet = document.createElement('p');
+                snippet.textContent = source.snippet;
+                block.appendChild(snippet);
               content.appendChild(block);
             });
             modal.classList.remove('hidden');
@@ -1242,16 +1287,23 @@
             function renderRagDebug(sources) {
               if (!sources || !sources.length) {
                 ragDebugPanel.classList.add('hidden');
-                ragDebugContent.innerHTML = '';
+                ragDebugContent.replaceChildren();
                 return;
               }
               ragDebugPanel.classList.remove('hidden');
-              ragDebugContent.innerHTML = '';
+              ragDebugContent.replaceChildren();
               sources.forEach((source) => {
                 const row = document.createElement('div');
                 row.className = 'debug-row';
                 const score = typeof source.score === 'number' ? source.score.toFixed(4) : 'n/a';
-                row.innerHTML = `<strong>[${source.id}] ${source.source}</strong> <span class="muted">(score: ${score})</span><br/><span>${source.snippet}</span>`;
+                const label = document.createElement('strong');
+                label.textContent = `[${source.id}] ${source.source}`;
+                const scoreEl = document.createElement('span');
+                scoreEl.className = 'muted';
+                scoreEl.textContent = ` (score: ${score})`;
+                const snippet = document.createElement('span');
+                snippet.textContent = source.snippet;
+                row.append(label, scoreEl, document.createElement('br'), snippet);
                 ragDebugContent.appendChild(row);
               });
             }
@@ -1288,15 +1340,24 @@
           });
           const data = await response.json();
           const resultsContainer = document.getElementById('search-results-container');
-          resultsContainer.innerHTML = '';
+          resultsContainer.replaceChildren();
 
           if (data.results.length === 0) {
-              resultsContainer.innerHTML = '<p class="muted">No results found.</p>';
+              const empty = document.createElement('p');
+              empty.className = 'muted';
+              empty.textContent = 'No results found.';
+              resultsContainer.appendChild(empty);
           } else {
               data.results.forEach(result => {
                   const item = document.createElement('div');
                   item.className = 'search-result-item';
-                  item.innerHTML = `<div class="result-title">${result.chat_title}</div><div class="result-preview">${result.message}</div>`;
+                  const title = document.createElement('div');
+                  title.className = 'result-title';
+                  title.textContent = result.chat_title || 'New Chat';
+                  const preview = document.createElement('div');
+                  preview.className = 'result-preview';
+                  preview.textContent = result.message || '';
+                  item.append(title, preview);
                   item.addEventListener('click', () => {
                       loadChat(result.chat_index);
                       document.getElementById('search-results-modal').classList.add('hidden');

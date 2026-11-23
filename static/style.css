@@ -1358,8 +1358,8 @@ input[type='checkbox'] {
   color: #e8e6e3;
 }
 
-/* Appended to AI messages by append_sources_to_response(); must follow the
-   .message-content rules above so its tighter spacing wins. */
+/* Rendered by attachSources() in chat.html; must follow the .message-content
+   rules above so its tighter spacing wins. */
 .message-sources {
   margin-top: 0.9rem;
   padding-top: 0.7rem;

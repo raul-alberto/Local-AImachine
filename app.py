@@ -6,8 +6,8 @@ import sqlite3
 import math
 import re
 import markdown
+import nh3
 from datetime import datetime
-from html import escape as html_escape
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -268,20 +268,6 @@ def build_rag_context(username, user_query, limit=4):
     return '\n\n'.join(context_lines), sources
 
 
-def append_sources_to_response(formatted_response, sources):
-    if not sources:
-        return formatted_response
-    items = ''.join(
-        f'<li><strong>[{src["id"]}] {html_escape(src["source"])}</strong>: {html_escape(src["snippet"])}</li>'
-        for src in sources
-    )
-    sources_html = (
-        '<div class="message-sources"><p><strong>Sources</strong></p>'
-        f'<ul>{items}</ul></div>'
-    )
-    return formatted_response + sources_html
-
-
 def _coerce_generation_settings(settings):
     settings = settings or {}
     merged = dict(DEFAULT_GENERATION_SETTINGS)
@@ -478,9 +464,10 @@ def normalize_chat_messages(chat_messages):
     for msg in chat_messages:
         if not isinstance(msg, dict):
             continue
+        message = msg.get('message', '')
         normalized.append({
             'type': msg.get('type', 'ai'),
-            'message': msg.get('message', ''),
+            'message': message if isinstance(message, str) else '',
             'sources': msg.get('sources', []) if isinstance(msg.get('sources', []), list) else [],
         })
     return normalized
@@ -519,12 +506,44 @@ def build_ollama_payload(prompt_payload, generation_settings, stream):
     }
 
 
+ALLOWED_REPLY_TAGS = {
+    'a', 'blockquote', 'br', 'code', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'hr', 'li', 'ol', 'p', 'pre', 'strong', 'table', 'tbody', 'td', 'th',
+    'thead', 'tr', 'ul',
+}
+ALLOWED_REPLY_ATTRIBUTES = {'a': {'href', 'title'}, 'code': {'class'}}
+
+
+def sanitize_reply_html(html):
+    """Keep what Markdown rendering produces and drop anything executable."""
+    return nh3.clean(
+        html,
+        tags=ALLOWED_REPLY_TAGS,
+        attributes=ALLOWED_REPLY_ATTRIBUTES,
+        url_schemes={'http', 'https', 'mailto'},
+        link_rel='noopener noreferrer',
+    )
+
+
+def sanitize_chat_history(chats):
+    """Sanitize AI replies from disk, imports or the session before they reach the browser."""
+    cleaned = []
+    for chat in chats:
+        messages = []
+        for message in chat.get('messages', []):
+            if message.get('type') == 'ai':
+                message = {**message, 'message': sanitize_reply_html(message.get('message', ''))}
+            messages.append(message)
+        cleaned.append({**chat, 'messages': messages})
+    return cleaned
+
+
 def format_ai_response(text):
-    return markdown.markdown(
+    return sanitize_reply_html(markdown.markdown(
         text,
         extensions=['fenced_code', 'tables', 'sane_lists', 'nl2br'],
         output_format='html5',
-    )
+    ))
 
 
 def is_ollama_available():
@@ -553,7 +572,8 @@ def login():
             session['profile'] = user_settings['profile']
             session['privacy_mode'] = user_settings.get('privacy_mode', DEFAULT_PRIVACY_MODE)
             if session['privacy_mode'] == 'persistent':
-                session['chats'] = normalize_chats(user_settings.get('saved_chats', []))
+                # Chats restored from disk predate (or bypass) write-time sanitizing.
+                session['chats'] = sanitize_chat_history(normalize_chats(user_settings.get('saved_chats', [])))
                 session['current_chat_index'] = user_settings.get('saved_current_chat_index', -1)
             else:
                 session['chats'] = []
@@ -610,7 +630,7 @@ def chat():
     profile.update(session.get('profile', {}))
     response = make_response(render_template(
         'chat.html',
-        chats=chats,
+        chats=sanitize_chat_history(chats),
         current_chat_index=current_chat_index,
         system_prompt=system_prompt,
         generation_settings=generation_settings,
@@ -681,7 +701,7 @@ def api_chat():
         response.raise_for_status()
         response_data = response.json()
         ai_response = response_data.get('response', 'Error: No response')
-        formatted_response = append_sources_to_response(format_ai_response(ai_response), rag_sources)
+        formatted_response = format_ai_response(ai_response)
     except requests.exceptions.Timeout:
         formatted_response = 'Error: AI response timed out. Please try again or allow more time for longer code answers.'
     except requests.exceptions.RequestException as e:
@@ -748,7 +768,7 @@ def api_chat_stream():
                     ai_response_raw += chunk
                     yield json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False) + '\n'
 
-            formatted_response = append_sources_to_response(format_ai_response(ai_response_raw), rag_sources)
+            formatted_response = format_ai_response(ai_response_raw)
             chats[current_index]['messages'].append({'type': 'ai', 'message': formatted_response, 'sources': rag_sources})
             session['chats'] = chats
             persist_session_if_needed()
@@ -1025,13 +1045,16 @@ def import_chats():
         chat for chat in imported_chats
         if isinstance(chat, dict) and 'title' in chat and 'messages' in chat
     ]
-    session['chats'] = normalize_chats(valid_chats)
-    session['current_chat_index'] = len(valid_chats) - 1 if valid_chats else -1
+    # Imported files are untrusted, and the browser renders AI messages straight
+    # from this response, so sanitize before storing or returning them.
+    imported = sanitize_chat_history(normalize_chats(valid_chats))
+    session['chats'] = imported
+    session['current_chat_index'] = len(imported) - 1 if imported else -1
     session['system_prompt'] = system_prompt
     persist_session_if_needed()
     return jsonify({
         'success': True,
-        'chats': valid_chats,
+        'chats': imported,
         'current_index': session['current_chat_index'],
     })
 
