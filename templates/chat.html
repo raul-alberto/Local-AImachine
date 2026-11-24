@@ -650,7 +650,7 @@
               await ensureChatMessages(currentChatIndex);
               const chat = chats[currentChatIndex];
               chat.messages.forEach(msg => {
-                  appendMessage(msg.message, msg.type, msg.sources || []);
+                  appendMessage(msg.message, msg.type, msg.sources || [], msg.type === 'ai');
               });
           }
           syncWelcome();
@@ -876,7 +876,7 @@
 
         function finalizeStreamingBubble(finalHtml, sources) {
           if (!activeStreamingTextDiv) {
-            appendMessage(finalHtml, 'ai', sources || []);
+            appendMessage(finalHtml, 'ai', sources || [], true);
             return;
           }
           activeStreamingTextDiv.style.whiteSpace = 'normal';
@@ -949,7 +949,7 @@
                   }
                 } else if (packet.type === 'error') {
                   // Server error text is not Markdown, so render it as plain text.
-                  appendMessage(packet.message || 'Error: Unable to get response', 'ai', [], true);
+                  appendMessage(packet.message || 'Error: Unable to get response', 'ai');
                 }
               }
               }
@@ -989,8 +989,7 @@
               currentChatIndex = data.current_index;
               setSidebarOpen(false);
               updateChatHistory();
-              document.getElementById('chat').replaceChildren();
-              syncWelcome();
+              renderChat();
           }
       });
 
@@ -1227,18 +1226,21 @@
           }
       });
 
-        function appendMessage(text, type, sources = [], asPlainText = false) {
+        // asHtml must be opted into: anything not explicitly known to be
+        // server-rendered Markdown stays a text node.
+        function appendMessage(text, type, sources = [], asHtml = false) {
           const chat = document.getElementById('chat');
           const bubble = document.createElement('div');
-          bubble.className = `msg-row msg-row--${type === 'ai' ? 'ai' : 'user'}`;
-          if (type === 'ai') {
+          const fromAi = type !== 'user';  // ai replies and error notices
+          bubble.className = `msg-row msg-row--${fromAi ? 'ai' : 'user'}`;
+          if (fromAi) {
               const avatar = document.createElement('div');
               avatar.className = 'ai-avatar flex-shrink-0';
               bubble.appendChild(avatar);
           }
           const textDiv = document.createElement('div');
-          textDiv.className = `msg-bubble msg-bubble--${type === 'ai' ? 'ai' : 'user'} message-content`;
-          if (type === 'ai' && !asPlainText) {
+          textDiv.className = `msg-bubble msg-bubble--${fromAi ? 'ai' : 'user'} message-content`;
+          if (asHtml) {
               // Only server-rendered Markdown reaches innerHTML, and
               // sanitize_reply_html() has already stripped scripts and handlers.
               textDiv.innerHTML = text;

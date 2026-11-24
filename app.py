@@ -1169,16 +1169,22 @@ def api_chat():
         response = requests.post(OLLAMA_URL, json=payload, timeout=120)
         response.raise_for_status()
         response_data = response.json()
-        ai_response = response_data.get('response', 'Error: No response')
-        formatted_response = format_ai_response(ai_response)
+        ai_response = response_data.get('response', '')
+        # Error text is shown as plain text, so it must not be stored as an AI
+        # message the browser would parse as Markdown/HTML on reload.
+        formatted_response = format_ai_response(ai_response) if ai_response else 'Error: No response'
+        message_type = 'ai' if ai_response else 'error'
     except requests.exceptions.Timeout:
         formatted_response = 'Error: AI response timed out. Please try again or allow more time for longer code answers.'
+        message_type = 'error'
     except requests.exceptions.RequestException as e:
         formatted_response = f'Error: AI request failed ({e})'
+        message_type = 'error'
     except ValueError:
         formatted_response = 'Error: Invalid response from AI service.'
+        message_type = 'error'
     
-    chats[current_index]['messages'].append({'type': 'ai', 'message': formatted_response, 'sources': rag_sources})
+    chats[current_index]['messages'].append({'type': message_type, 'message': formatted_response, 'sources': rag_sources})
     
     save_chats(username, chats)
     return jsonify({'response': formatted_response, 'title': chats[current_index]['title'], 'chats': chats_for_json(chats), 'current_index': current_index, 'sources': rag_sources})
@@ -1240,7 +1246,7 @@ def api_chat_stream():
             }, ensure_ascii=False) + '\n'
         except Exception as e:
             error_message = f'Error: AI request failed ({e})'
-            chats[current_index]['messages'].append({'type': 'ai', 'message': error_message, 'sources': []})
+            chats[current_index]['messages'].append({'type': 'error', 'message': error_message, 'sources': []})
             save_chats(username, chats)
             yield json.dumps({'type': 'error', 'message': error_message}, ensure_ascii=False) + '\n'
 
@@ -1252,7 +1258,7 @@ def new_chat():
         return jsonify({'error': 'Unauthorized'}), 401
     username = get_username_from_session()
     chats = load_chats(username)
-    chats.append({'title': 'New Chat', 'messages': []})
+    chats.append({'title': 'New Chat', 'messages': [], 'tags': []})
     save_chats(username, chats)
     current_index = len(chats) - 1
     session['current_chat_index'] = current_index
