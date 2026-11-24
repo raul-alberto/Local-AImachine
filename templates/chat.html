@@ -114,6 +114,14 @@
     <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 
     <div class="main">
+      {% if default_admin_password %}
+      <div class="legacy-warning" role="alert">
+        This account still uses the published default password.
+        <a href="{{ url_for('change_password') }}">Change it now</a> before
+        exposing Court to your network.
+      </div>
+      {% endif %}
+
       <header class="topbar">
         <button
           type="button"

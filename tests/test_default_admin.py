@@ -14,6 +14,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import app as court  # noqa: E402  (path bootstrap must run first)
 
 
+@pytest.fixture(autouse=True)
+def fresh_default_admin_cache():
+    court.uses_default_admin_password.cache_clear()
+    yield
+    court.uses_default_admin_password.cache_clear()
+
+
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     monkeypatch.setattr(court, 'USER_DB_FILE', str(tmp_path / 'users.db'))
@@ -49,22 +56,61 @@ def test_fresh_install_has_no_default_admin(db):
     assert court.uses_default_admin_password() is False
 
 
-def test_login_page_warns_while_the_default_password_is_live(db):
+def test_signed_out_login_page_does_not_disclose_the_default_password(db):
     court.create_user('admin', 'admin123', 'Admin')
 
     page = client().get('/')
 
     assert page.status_code == 200
-    assert b'published password' in page.data
+    assert b'published default password' not in page.data
 
 
-def test_login_page_warning_goes_away_after_the_change(db):
+def test_signed_in_admin_sees_the_warning(db):
+    court.create_user('admin', 'admin123', 'Admin')
+
+    page = client('admin').get('/chat')
+
+    assert page.status_code == 200
+    assert b'published default password' in page.data
+
+
+def test_warning_goes_away_after_the_password_change(db):
     court.create_user('admin', 'admin123', 'Admin')
     court.update_user_password('admin', 'a-much-better-password')
 
-    page = client().get('/')
+    page = client('admin').get('/chat')
 
-    assert b'published password' not in page.data
+    assert b'published default password' not in page.data
+
+
+def test_other_users_do_not_see_the_warning(db):
+    court.create_user('admin', 'admin123', 'Admin')
+    court.create_user('alice', 'password123', 'Alice')
+
+    page = client('alice').get('/chat')
+
+    assert b'published default password' not in page.data
+
+
+def test_default_password_check_is_cached_until_a_change(db, monkeypatch):
+    court.create_user('admin', 'admin123', 'Admin')
+    real_check = court.check_password_hash
+    calls = []
+
+    def counting_check(password_hash, password):
+        calls.append(password)
+        return real_check(password_hash, password)
+
+    monkeypatch.setattr(court, 'check_password_hash', counting_check)
+
+    assert court.uses_default_admin_password() is True
+    assert court.uses_default_admin_password() is True
+    assert len(calls) == 1
+
+    court.update_user_password('admin', 'a-much-better-password')
+
+    assert court.uses_default_admin_password() is False
+    assert len(calls) == 2
 
 
 def test_password_page_requires_sign_in(db):

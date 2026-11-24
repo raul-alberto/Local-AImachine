@@ -11,6 +11,7 @@ import time
 import markdown
 import nh3
 from datetime import datetime, timedelta
+from functools import cache
 from html import unescape
 from urllib.parse import urlsplit
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -453,6 +454,7 @@ def create_user(username, password, display_name):
         conn.commit()
     finally:
         conn.close()
+    uses_default_admin_password.cache_clear()
 
 
 def update_user_password(username, password):
@@ -465,6 +467,7 @@ def update_user_password(username, password):
         conn.commit()
     finally:
         conn.close()
+    uses_default_admin_password.cache_clear()
 
 
 # Credentials older installs were seeded with and are published in the docs.
@@ -472,12 +475,14 @@ DEFAULT_ADMIN_USERNAME = 'admin'
 DEFAULT_ADMIN_PASSWORD = 'admin123'
 
 
+@cache
 def uses_default_admin_password():
-    """True while an upgraded install still accepts the published admin login."""
-    try:
-        user = get_user_by_username(DEFAULT_ADMIN_USERNAME)
-    except sqlite3.Error:
-        return False
+    """True while an upgraded install still accepts the published admin login.
+
+    Each answer costs a scrypt verification, so it is cached for the process and
+    cleared whenever an account password changes.
+    """
+    user = get_user_by_username(DEFAULT_ADMIN_USERNAME)
     return bool(user and check_password_hash(user['password_hash'], DEFAULT_ADMIN_PASSWORD))
 
 
@@ -923,11 +928,7 @@ def login():
                 return start_user_session(user)
             record_login_failure(attempt_key)
             flash('Invalid credentials')
-    return render_template(
-        'login.html',
-        initial_theme=get_preferred_theme(),
-        default_admin_warning=uses_default_admin_password(),
-    ), status
+    return render_template('login.html', initial_theme=get_preferred_theme()), status
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -1012,6 +1013,9 @@ def chat():
         rag_status=rag_status_for_user(get_username_from_session()),
         privacy_mode=session.get('privacy_mode', DEFAULT_PRIVACY_MODE),
         initial_theme=get_preferred_theme(),
+        default_admin_password=(
+            session.get('username') == DEFAULT_ADMIN_USERNAME and uses_default_admin_password()
+        ),
     ))
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
