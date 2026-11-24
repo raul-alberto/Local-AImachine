@@ -173,6 +173,25 @@ def test_changing_the_default_admin_password_signs_out_other_sessions(db):
     assert evicted.headers['Location'].endswith('/')
 
 
+def test_signing_in_with_the_default_password_cannot_reach_chat_until_it_changes(db):
+    court.create_user('admin', 'admin123', 'Admin')
+    admin = login('admin', 'admin123')
+
+    blocked = admin.get('/chat')
+    assert blocked.status_code == 302
+    assert blocked.headers['Location'].endswith('/account/password')
+    assert admin.get('/chat', follow_redirects=True).request.path == '/account/password'
+
+    changed = admin.post('/account/password', data={
+        'current_password': 'admin123',
+        'new_password': 'a-much-better-password',
+        'confirm_password': 'a-much-better-password',
+    })
+    assert changed.status_code == 302
+
+    assert admin.get('/chat').status_code == 200
+
+
 def test_password_page_requires_sign_in(db):
     response = client().get('/account/password')
 
