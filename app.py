@@ -6,8 +6,8 @@ import json
 import sqlite3
 import math
 import re
-import time
 import secrets
+import time
 import markdown
 import nh3
 from datetime import datetime, timedelta
@@ -91,6 +91,7 @@ app.config.update(
     SESSION_COOKIE_SAMESITE='Lax',
     PERMANENT_SESSION_LIFETIME=SESSION_LIFETIME,
 )
+
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
@@ -389,6 +390,7 @@ def init_user_db():
             )
             '''
         )
+        _ensure_chat_table(conn)
         conn.commit()
     finally:
         conn.close()
@@ -476,7 +478,6 @@ def get_user_settings(username):
     if privacy_mode not in ('ephemeral', 'persistent'):
         privacy_mode = DEFAULT_PRIVACY_MODE
 
-    saved_chats = user_data.get('saved_chats', []) if isinstance(user_data.get('saved_chats', []), list) else []
     saved_current_chat_index = user_data.get('saved_current_chat_index', -1)
     if not isinstance(saved_current_chat_index, int):
         saved_current_chat_index = -1
@@ -486,20 +487,17 @@ def get_user_settings(username):
         'generation_settings': generation_settings,
         'profile': profile,
         'privacy_mode': privacy_mode,
-        'saved_chats': saved_chats,
         'saved_current_chat_index': saved_current_chat_index,
     }
 
 
-def save_user_settings(username, system_prompt, generation_settings, profile, privacy_mode=None, saved_chats=None, saved_current_chat_index=None):
+def save_user_settings(username, system_prompt, generation_settings, profile, privacy_mode=None):
     storage = load_storage()
     users = storage.setdefault('users', {})
     existing = users.get(username, {}) if isinstance(users.get(username, {}), dict) else {}
     resolved_privacy_mode = privacy_mode or existing.get('privacy_mode', DEFAULT_PRIVACY_MODE)
     if resolved_privacy_mode not in ('ephemeral', 'persistent'):
         resolved_privacy_mode = DEFAULT_PRIVACY_MODE
-    resolved_saved_chats = saved_chats if isinstance(saved_chats, list) else existing.get('saved_chats', [])
-    resolved_saved_current_chat_index = saved_current_chat_index if isinstance(saved_current_chat_index, int) else existing.get('saved_current_chat_index', -1)
 
     users[username] = {
         'system_prompt': system_prompt,
@@ -510,26 +508,146 @@ def save_user_settings(username, system_prompt, generation_settings, profile, pr
             'theme': (profile.get('theme') or DEFAULT_PROFILE['theme']).strip().lower(),
         },
         'privacy_mode': resolved_privacy_mode,
-        'saved_chats': resolved_saved_chats,
-        'saved_current_chat_index': resolved_saved_current_chat_index,
     }
     save_storage(storage)
 
 
 def sync_session_to_disk():
-    username = get_username_from_session()
-    privacy_mode = session.get('privacy_mode', DEFAULT_PRIVACY_MODE)
-    saved_chats = session.get('chats', []) if privacy_mode == 'persistent' else []
-    saved_current_index = session.get('current_chat_index', -1) if privacy_mode == 'persistent' else -1
     save_user_settings(
-        username,
+        get_username_from_session(),
         session.get('system_prompt', DEFAULT_SYSTEM_PROMPT),
         session.get('generation_settings', DEFAULT_GENERATION_SETTINGS),
         session.get('profile', DEFAULT_PROFILE),
-        privacy_mode=privacy_mode,
-        saved_chats=saved_chats,
-        saved_current_chat_index=saved_current_index,
+        privacy_mode=session.get('privacy_mode', DEFAULT_PRIVACY_MODE),
     )
+
+
+def _ensure_chat_table(conn):
+    conn.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS chats (
+            user_id INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            messages TEXT NOT NULL,
+            tags TEXT NOT NULL,
+            PRIMARY KEY (user_id, position)
+        )
+        '''
+    )
+
+
+def _connect_chat_db():
+    conn = sqlite3.connect(USER_DB_FILE)
+    conn.row_factory = sqlite3.Row
+    _ensure_chat_table(conn)
+    conn.commit()
+    return conn
+
+
+def _user_id_for_username(username):
+    if not username:
+        return None
+    conn = sqlite3.connect(USER_DB_FILE)
+    try:
+        row = conn.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
+        return row[0] if row else None
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+def _chat_from_row(row):
+    def decode_list(value):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return []
+        return parsed if isinstance(parsed, list) else []
+
+    return {
+        'title': row['title'] or 'New Chat',
+        'messages': normalize_chat_messages(decode_list(row['messages'])),
+        'tags': decode_list(row['tags']),
+    }
+
+
+def save_chats(username, chats):
+    """Replace this user's stored chats in SQLite.
+
+    Chats live server-side rather than in the session cookie, which overflowed
+    well under a long conversation and resent every message on every request.
+    """
+    user_id = _user_id_for_username(username)
+    if user_id is None:
+        return
+    normalized = normalize_chats(chats if isinstance(chats, list) else [])
+    conn = _connect_chat_db()
+    try:
+        with conn:
+            conn.execute('DELETE FROM chats WHERE user_id = ?', (user_id,))
+            conn.executemany(
+                'INSERT INTO chats (user_id, position, title, messages, tags) VALUES (?, ?, ?, ?, ?)',
+                [
+                    (
+                        user_id,
+                        position,
+                        chat['title'],
+                        json.dumps(chat['messages'], ensure_ascii=False),
+                        json.dumps(chat['tags'], ensure_ascii=False),
+                    )
+                    for position, chat in enumerate(normalized)
+                ],
+            )
+    finally:
+        conn.close()
+
+
+def delete_chats(username):
+    user_id = _user_id_for_username(username)
+    if user_id is None:
+        return
+    conn = _connect_chat_db()
+    try:
+        with conn:
+            conn.execute('DELETE FROM chats WHERE user_id = ?', (user_id,))
+    finally:
+        conn.close()
+
+
+def migrate_legacy_chats(username):
+    """Move chats older versions kept in storage.json into SQLite, exactly once."""
+    storage = load_storage()
+    users = storage.get('users', {})
+    entry = users.get(username) if isinstance(users, dict) else None
+    if not isinstance(entry, dict):
+        return
+    legacy = entry.get('saved_chats')
+    if not isinstance(legacy, list) or not legacy:
+        return
+    # Older versions rendered these straight to the browser without sanitizing.
+    chats = sanitize_chat_history(normalize_chats(legacy))
+    entry.pop('saved_chats', None)
+    entry.pop('saved_current_chat_index', None)
+    save_storage(storage)
+    save_chats(username, chats)
+
+
+def load_chats(username):
+    """Return this user's stored chats, oldest first."""
+    user_id = _user_id_for_username(username)
+    if user_id is None:
+        return []
+    conn = _connect_chat_db()
+    try:
+        rows = conn.execute(
+            'SELECT title, messages, tags FROM chats WHERE user_id = ? ORDER BY position',
+            (user_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_chat_from_row(row) for row in rows]
 
 
 def normalize_chat_messages(chat_messages):
@@ -557,11 +675,6 @@ def normalize_chats(chats):
             'tags': chat.get('tags', []) if isinstance(chat.get('tags', []), list) else [],
         })
     return normalized_chats
-
-
-def persist_session_if_needed():
-    if session.get('privacy_mode', DEFAULT_PRIVACY_MODE) == 'persistent':
-        sync_session_to_disk()
 
 
 def build_ollama_payload(prompt_payload, generation_settings, stream):
@@ -651,11 +764,37 @@ def record_login_failure(key):
     _login_failures[key] = entry
 
 
+def start_user_session(user):
+    """Populate the session for a freshly authenticated user."""
+    session.clear()
+    session.permanent = True
+    session['logged_in'] = True
+    session['user_id'] = user['id']
+    session['username'] = user['username']
+    session['display_name'] = user['display_name']
+    user_settings = get_user_settings(user['username'])
+    session['system_prompt'] = user_settings['system_prompt']
+    session['generation_settings'] = user_settings['generation_settings']
+    session['profile'] = user_settings['profile']
+    session['privacy_mode'] = user_settings.get('privacy_mode', DEFAULT_PRIVACY_MODE)
+    if session['privacy_mode'] == 'persistent':
+        migrate_legacy_chats(user['username'])
+        session['current_chat_index'] = user_settings.get('saved_current_chat_index', -1)
+    else:
+        # Ephemeral chats never outlive a sign-in.
+        delete_chats(user['username'])
+        session['current_chat_index'] = -1
+    response = redirect(url_for('chat'))
+    response.set_cookie('court_theme', normalize_theme(session['profile'].get('theme')), max_age=31536000)
+    return response
+
+
 @app.route('/', methods=['GET', 'POST'])
 def login():
     if not has_any_user():
         flash('No account exists yet. Create the first one to start using Court.')
         return redirect(url_for('register'))
+    status = 200
     if request.method == 'POST':
         username = (request.form.get('username') or '').strip()
         password = request.form.get('password') or ''
@@ -663,34 +802,15 @@ def login():
         lock_seconds = login_lock_seconds(attempt_key)
         if lock_seconds:
             flash(f'Too many failed attempts. Try again in {lock_seconds} seconds.')
-            return render_template('login.html', initial_theme=get_preferred_theme()), 429
-        user = get_user_by_username(username)
-        if user and check_password_hash(user['password_hash'], password):
-            _login_failures.pop(attempt_key, None)
-            session.clear()
-            session.permanent = True
-            session['logged_in'] = True
-            session['user_id'] = user['id']
-            session['username'] = user['username']
-            session['display_name'] = user['display_name']
-            user_settings = get_user_settings(user['username'])
-            session['system_prompt'] = user_settings['system_prompt']
-            session['generation_settings'] = user_settings['generation_settings']
-            session['profile'] = user_settings['profile']
-            session['privacy_mode'] = user_settings.get('privacy_mode', DEFAULT_PRIVACY_MODE)
-            if session['privacy_mode'] == 'persistent':
-                # Chats restored from disk predate (or bypass) write-time sanitizing.
-                session['chats'] = sanitize_chat_history(normalize_chats(user_settings.get('saved_chats', [])))
-                session['current_chat_index'] = user_settings.get('saved_current_chat_index', -1)
-            else:
-                session['chats'] = []
-                session['current_chat_index'] = -1
-            response = redirect(url_for('chat'))
-            response.set_cookie('court_theme', normalize_theme(session['profile'].get('theme')), max_age=31536000)
-            return response
-        record_login_failure(attempt_key)
-        flash('Invalid credentials')
-    return render_template('login.html', initial_theme=get_preferred_theme())
+            status = 429
+        else:
+            user = get_user_by_username(username)
+            if user and check_password_hash(user['password_hash'], password):
+                _login_failures.pop(attempt_key, None)
+                return start_user_session(user)
+            record_login_failure(attempt_key)
+            flash('Invalid credentials')
+    return render_template('login.html', initial_theme=get_preferred_theme()), status
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -720,18 +840,21 @@ def register():
 
     return render_template('register.html', initial_theme=get_preferred_theme())
 
+
 @app.route('/chat')
 def chat():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
-    chats = session.get('chats', [])
+    username = get_username_from_session()
+    chats = load_chats(username)
     current_chat_index = session.get('current_chat_index', -1)
     if not chats:
         chats.append({'title': 'New Chat', 'messages': []})
         current_chat_index = 0
-        session['chats'] = chats
-        session['current_chat_index'] = current_chat_index
-        persist_session_if_needed()
+        save_chats(username, chats)
+    elif current_chat_index < 0 or current_chat_index >= len(chats):
+        current_chat_index = len(chats) - 1
+    session['current_chat_index'] = current_chat_index
     system_prompt = session.get('system_prompt', DEFAULT_SYSTEM_PROMPT)
     generation_settings = _coerce_generation_settings(session.get('generation_settings', DEFAULT_GENERATION_SETTINGS))
     profile = dict(DEFAULT_PROFILE)
@@ -764,6 +887,8 @@ def faqs():
 @app.route('/logout')
 def logout():
     current_theme = normalize_theme(request.cookies.get('court_theme', get_preferred_theme()))
+    if session.get('privacy_mode') == 'ephemeral':
+        delete_chats(get_username_from_session())
     session.clear()
     response = redirect(url_for('login'))
     response.set_cookie('court_theme', current_theme, max_age=31536000)
@@ -779,18 +904,17 @@ def api_chat():
         return jsonify({'error': 'Unauthorized'}), 401
     data = request.get_json()
     user_message = data.get('message', '')
-    chats = session.get('chats', [])
+    username = get_username_from_session()
+    chats = load_chats(username)
     current_index = session.get('current_chat_index', -1)
-    
+
     if current_index == -1 or current_index >= len(chats):
         # Create new chat with default user name placeholder
         chats.append({'title': 'New Chat', 'messages': []})
         current_index = len(chats) - 1
-        session['current_chat_index'] = current_index
-    
+    session['current_chat_index'] = current_index
+
     chats[current_index]['messages'].append({'type': 'user', 'message': user_message, 'sources': []})
-    
-    username = get_username_from_session()
     system_prompt = session.get('system_prompt', DEFAULT_SYSTEM_PROMPT)
     generation_settings = _coerce_generation_settings(session.get('generation_settings', DEFAULT_GENERATION_SETTINGS))
     rag_context, rag_sources = build_rag_context(username, user_message)
@@ -819,8 +943,7 @@ def api_chat():
     
     chats[current_index]['messages'].append({'type': 'ai', 'message': formatted_response, 'sources': rag_sources})
     
-    session['chats'] = chats
-    persist_session_if_needed()
+    save_chats(username, chats)
     return jsonify({'response': formatted_response, 'title': chats[current_index]['title'], 'chats': chats, 'current_index': current_index, 'sources': rag_sources})
 
 
@@ -834,16 +957,15 @@ def api_chat_stream():
     if not user_message:
         return jsonify({'error': 'Message cannot be empty'}), 400
 
-    chats = session.get('chats', [])
+    username = get_username_from_session()
+    chats = load_chats(username)
     current_index = session.get('current_chat_index', -1)
     if current_index == -1 or current_index >= len(chats):
         chats.append({'title': 'New Chat', 'messages': []})
         current_index = len(chats) - 1
-        session['current_chat_index'] = current_index
+    session['current_chat_index'] = current_index
 
     chats[current_index]['messages'].append({'type': 'user', 'message': user_message, 'sources': []})
-
-    username = get_username_from_session()
     system_prompt = session.get('system_prompt', DEFAULT_SYSTEM_PROMPT)
     generation_settings = _coerce_generation_settings(session.get('generation_settings', DEFAULT_GENERATION_SETTINGS))
     rag_context, rag_sources = build_rag_context(username, user_message)
@@ -878,8 +1000,7 @@ def api_chat_stream():
 
             formatted_response = format_ai_response(ai_response_raw)
             chats[current_index]['messages'].append({'type': 'ai', 'message': formatted_response, 'sources': rag_sources})
-            session['chats'] = chats
-            persist_session_if_needed()
+            save_chats(username, chats)
             yield json.dumps({
                 'type': 'done',
                 'response': formatted_response,
@@ -890,8 +1011,7 @@ def api_chat_stream():
         except Exception as e:
             error_message = f'Error: AI request failed ({e})'
             chats[current_index]['messages'].append({'type': 'ai', 'message': error_message, 'sources': []})
-            session['chats'] = chats
-            persist_session_if_needed()
+            save_chats(username, chats)
             yield json.dumps({'type': 'error', 'message': error_message}, ensure_ascii=False) + '\n'
 
     return Response(generate(), mimetype='application/x-ndjson')
@@ -900,23 +1020,22 @@ def api_chat_stream():
 def new_chat():
     if not session.get('logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
-    chats = session.get('chats', [])
+    username = get_username_from_session()
+    chats = load_chats(username)
     chats.append({'title': 'New Chat', 'messages': []})
-    session['chats'] = chats
+    save_chats(username, chats)
     current_index = len(chats) - 1
     session['current_chat_index'] = current_index
-    persist_session_if_needed()
     return jsonify({'success': True, 'chats': chats, 'current_index': current_index})
 
 @app.route('/api/load_chat/<int:index>', methods=['POST'])
 def load_chat(index):
     if not session.get('logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
-    chats = session.get('chats', [])
+    chats = load_chats(get_username_from_session())
     if index < 0 or index >= len(chats):
         return jsonify({'error': 'Invalid chat index'}), 400
     session['current_chat_index'] = index
-    persist_session_if_needed()
     return jsonify({'success': True})
 
 @app.route('/api/save_settings', methods=['POST'])
@@ -960,7 +1079,7 @@ def api_privacy_wipe():
         return jsonify({'error': 'Unauthorized'}), 401
 
     username = get_username_from_session()
-    session['chats'] = []
+    delete_chats(username)
     session['current_chat_index'] = -1
     session['system_prompt'] = DEFAULT_SYSTEM_PROMPT
     session['generation_settings'] = dict(DEFAULT_GENERATION_SETTINGS)
@@ -1156,10 +1275,9 @@ def import_chats():
     # Imported files are untrusted, and the browser renders AI messages straight
     # from this response, so sanitize before storing or returning them.
     imported = sanitize_chat_history(normalize_chats(valid_chats))
-    session['chats'] = imported
+    save_chats(get_username_from_session(), imported)
     session['current_chat_index'] = len(imported) - 1 if imported else -1
     session['system_prompt'] = system_prompt
-    persist_session_if_needed()
     return jsonify({
         'success': True,
         'chats': imported,
@@ -1172,33 +1290,34 @@ def rename_chat(index):
         return jsonify({'error': 'Unauthorized'}), 401
     data = request.get_json() or {}
     new_title = (data.get('title') or '').strip() or 'New Chat'
-    chats = session.get('chats', [])
+    username = get_username_from_session()
+    chats = load_chats(username)
     if index < 0 or index >= len(chats):
         return jsonify({'error': 'Invalid chat index'}), 400
     chats[index]['title'] = new_title
-    session['chats'] = chats
-    persist_session_if_needed()
+    save_chats(username, chats)
     return jsonify({'success': True, 'chats': chats})
 
 @app.route('/api/delete_chat/<int:index>', methods=['POST'])
 def delete_chat(index):
     if not session.get('logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
-    chats = session.get('chats', [])
+    username = get_username_from_session()
+    chats = load_chats(username)
     if index < 0 or index >= len(chats):
         return jsonify({'error': 'Invalid chat index'}), 400
     chats.pop(index)
     new_index = len(chats) - 1
-    session['chats'] = chats
+    save_chats(username, chats)
     session['current_chat_index'] = new_index if new_index >= 0 else -1
-    persist_session_if_needed()
     return jsonify({'success': True, 'chats': chats, 'current_index': session['current_chat_index']})
 
 @app.route('/api/add_tag/<int:index>', methods=['POST'])
 def add_tag(index):
     if not session.get('logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
-    chats = session.get('chats', [])
+    username = get_username_from_session()
+    chats = load_chats(username)
     if index < 0 or index >= len(chats):
         return jsonify({'error': 'Invalid chat index'}), 400
     data = request.get_json() or {}
@@ -1209,30 +1328,29 @@ def add_tag(index):
         chats[index]['tags'] = []
     if tag not in chats[index]['tags']:
         chats[index]['tags'].append(tag)
-    session['chats'] = chats
-    persist_session_if_needed()
+    save_chats(username, chats)
     return jsonify({'success': True, 'chats': chats})
 
 @app.route('/api/remove_tag/<int:index>', methods=['POST'])
 def remove_tag(index):
     if not session.get('logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
-    chats = session.get('chats', [])
+    username = get_username_from_session()
+    chats = load_chats(username)
     if index < 0 or index >= len(chats):
         return jsonify({'error': 'Invalid chat index'}), 400
     data = request.get_json() or {}
     tag = (data.get('tag') or '').strip()
     if 'tags' in chats[index] and tag in chats[index]['tags']:
         chats[index]['tags'].remove(tag)
-    session['chats'] = chats
-    persist_session_if_needed()
+    save_chats(username, chats)
     return jsonify({'success': True, 'chats': chats})
 
 @app.route('/api/summarize_chat/<int:index>', methods=['POST'])
 def summarize_chat(index):
     if not session.get('logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
-    chats = session.get('chats', [])
+    chats = load_chats(get_username_from_session())
     if index < 0 or index >= len(chats):
         return jsonify({'error': 'Invalid chat index'}), 400
     
@@ -1265,7 +1383,7 @@ def search_messages():
         return jsonify({'error': 'Unauthorized'}), 401
     data = request.get_json() or {}
     query = (data.get('query') or '').strip().lower()
-    chats = session.get('chats', [])
+    chats = load_chats(get_username_from_session())
     
     if not query:
         return jsonify({'results': []})

@@ -221,7 +221,7 @@ Use this workflow to reduce false refusals while preserving refusals for clearly
 In Settings:
 
 1. Choose `Privacy mode`:
-   - `Ephemeral`: chats stay in session only.
+   - `Ephemeral`: chats are deleted from this device when you log out.
    - `Persistent`: chats are saved locally per user.
 2. Use `Wipe local data` to clear chats, indexed docs, and reset settings for the current account.
 3. Failed logins are throttled: after 5 misses from the same address and username within 15 minutes, sign-in is locked for 60 seconds, doubling on each further miss.
