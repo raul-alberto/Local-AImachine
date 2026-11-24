@@ -53,6 +53,14 @@ def load_or_create_secret_key(path):
     """
     env_key = os.environ.get('COURT_SECRET_KEY') or os.environ.get('BETTEN_SECRET_KEY')
     if env_key:
+        # A short value is usually a placeholder copied from docs or an old
+        # install. Accepting it would make every session cookie forgeable, so
+        # refuse to start instead of signing with it.
+        if len(env_key) < KEY_MIN_LENGTH:
+            raise RuntimeError(
+                f'COURT_SECRET_KEY must be at least {KEY_MIN_LENGTH} characters. '
+                'Unset it to let Court generate and persist a key in .court_secret.'
+            )
         return env_key
 
     stored = _read_key_file(path)

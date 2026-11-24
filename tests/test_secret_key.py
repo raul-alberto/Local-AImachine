@@ -53,6 +53,16 @@ def test_environment_variable_wins_without_touching_disk(tmp_path, monkeypatch):
     assert not path.exists()
 
 
+def test_short_environment_key_refuses_to_start(tmp_path, monkeypatch):
+    # The old constant default was exactly this string; it must never be used.
+    monkeypatch.setenv("COURT_SECRET_KEY", "your_secret_key_here")
+    path = tmp_path / ".court_secret"
+
+    with pytest.raises(RuntimeError, match="at least 32 characters"):
+        court.load_or_create_secret_key(str(path))
+    assert not path.exists()
+
+
 def test_waits_for_a_concurrent_writer_instead_of_truncating(tmp_path, monkeypatch):
     # Another process created the file but has not written its key yet.
     path = tmp_path / ".court_secret"
