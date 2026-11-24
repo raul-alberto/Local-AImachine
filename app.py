@@ -826,16 +826,15 @@ _login_failures = {}
 
 def login_lock_seconds(key):
     entry = _login_failures.get(key)
-    return max(0, int(entry['locked_until'] - time.time())) if entry else 0
+    return max(0, math.ceil(entry['locked_until'] - time.time())) if entry else 0
 
 
 def record_login_failure(key):
     now = time.time()
     entry = _login_failures.get(key)
     if not entry or now - entry['first'] > LOGIN_WINDOW_SECONDS:
-        entry = {'count': 1, 'first': now, 'locked_until': 0}
-    else:
-        entry['count'] += 1
+        entry = {'count': 0, 'first': now, 'locked_until': 0}
+    entry['count'] += 1
     if entry['count'] >= LOGIN_MAX_ATTEMPTS:
         # 60s on the fifth miss, doubling for each further miss (max 15 min).
         lock = 60 * 2 ** (entry['count'] - LOGIN_MAX_ATTEMPTS)
@@ -1504,19 +1503,15 @@ def main():
         print('Sign in and change it at /account/password.')
     parser = argparse.ArgumentParser(description='Run Court locally.')
     parser.add_argument(
-        '--host',
-        default=os.environ.get('COURT_HOST', '127.0.0.1'),
+        '--host', default=os.environ.get('COURT_HOST', '127.0.0.1'),
         help='interface to listen on (default: 127.0.0.1)',
     )
     parser.add_argument(
-        '--port',
-        type=int,
-        default=int(os.environ.get('COURT_PORT', '5000')),
+        '--port', type=int, default=int(os.environ.get('COURT_PORT', '5000')),
         help='port to listen on (default: 5000)',
     )
     parser.add_argument(
-        '--lan',
-        action='store_true',
+        '--lan', action='store_true',
         help='listen on all interfaces so other devices on your network can connect',
     )
     args = parser.parse_args()
