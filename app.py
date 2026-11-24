@@ -417,8 +417,33 @@ def _apply_preset(settings):
     return _coerce_generation_settings(settings)
 
 
+SCHEMA_VERSION = 1
+USER_DB_TIMEOUT_SECONDS = 5
+
+
+def _connect_user_db():
+    """Open users.db set up for concurrent readers and writers.
+
+    WAL keeps readers out of the writer's way, and the busy timeout makes a
+    competing writer wait for the lock instead of failing with "database is
+    locked".
+    """
+    conn = sqlite3.connect(USER_DB_FILE, timeout=USER_DB_TIMEOUT_SECONDS)
+    conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA journal_mode = WAL')
+    conn.execute(f'PRAGMA busy_timeout = {USER_DB_TIMEOUT_SECONDS * 1000}')
+    conn.execute('PRAGMA foreign_keys = ON')
+    return conn
+
+
+def _stamp_schema_version(conn):
+    """Record the schema version so later releases know what to migrate."""
+    if conn.execute('PRAGMA user_version').fetchone()[0] < SCHEMA_VERSION:
+        conn.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
+
+
 def init_user_db():
-    conn = sqlite3.connect(USER_DB_FILE)
+    conn = _connect_user_db()
     try:
         conn.execute(
             '''
@@ -433,6 +458,7 @@ def init_user_db():
         )
         _ensure_user_columns(conn)
         _ensure_chat_table(conn)
+        _stamp_schema_version(conn)
         conn.commit()
     finally:
         conn.close()
@@ -446,7 +472,7 @@ def _ensure_user_columns(conn):
 
 
 def has_any_user():
-    conn = sqlite3.connect(USER_DB_FILE)
+    conn = _connect_user_db()
     try:
         row = conn.execute('SELECT COUNT(*) FROM users').fetchone()
         return bool(row and row[0])
@@ -455,8 +481,7 @@ def has_any_user():
 
 
 def get_user_by_username(username):
-    conn = sqlite3.connect(USER_DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _connect_user_db()
     try:
         row = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
         return dict(row) if row else None
@@ -465,7 +490,7 @@ def get_user_by_username(username):
 
 
 def create_user(username, password, display_name):
-    conn = sqlite3.connect(USER_DB_FILE)
+    conn = _connect_user_db()
     try:
         conn.execute(
             'INSERT INTO users (username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)',
@@ -479,7 +504,7 @@ def create_user(username, password, display_name):
 
 def update_user_password(username, password):
     """Replace the password and sign out every other session for the account."""
-    conn = sqlite3.connect(USER_DB_FILE)
+    conn = _connect_user_db()
     try:
         conn.execute(
             'UPDATE users SET password_hash = ?, session_version = session_version + 1 '
@@ -622,8 +647,7 @@ def _ensure_chat_table(conn):
 
 
 def _connect_chat_db():
-    conn = sqlite3.connect(USER_DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _connect_user_db()
     _ensure_chat_table(conn)
     conn.commit()
     return conn
@@ -632,7 +656,7 @@ def _connect_chat_db():
 def _user_id_for_username(username):
     if not username:
         return None
-    conn = sqlite3.connect(USER_DB_FILE)
+    conn = _connect_user_db()
     try:
         row = conn.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
         return row[0] if row else None

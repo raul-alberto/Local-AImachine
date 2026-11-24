@@ -207,6 +207,7 @@ llama.cpp/
 
 # Local app state
 users.db
+users.db-*
 
 # Screenshots captured during local verification
 artifacts/
