@@ -209,6 +209,7 @@ llama.cpp/
 users.db
 rag_store.json
 storage.json
+.court_secret
 
 # Optional local visuals
 first logo ex.jpg

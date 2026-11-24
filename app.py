@@ -7,13 +7,81 @@ import sqlite3
 import math
 import re
 import time
+import secrets
 import markdown
 import nh3
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('COURT_SECRET_KEY') or os.environ.get('BETTEN_SECRET_KEY', 'your_secret_key_here')  # Set COURT_SECRET_KEY in environment for production
+USER_DB_FILE = os.path.join(app.root_path, 'users.db')
+# Keep the session key beside users.db so a packaged or relocated install keeps
+# the same key, and the same sessions, across launches.
+SECRET_KEY_FILE = os.path.join(os.path.dirname(USER_DB_FILE), '.court_secret')
+
+
+def _read_key_file(path):
+    try:
+        with open(path, encoding='utf-8') as handle:
+            return handle.read().strip()
+    except FileNotFoundError:
+        return ''
+    except OSError as error:
+        print(f'Warning: could not read the session key file {path} ({error}).')
+        return ''
+
+
+KEY_MIN_LENGTH = 32
+
+
+def _warn_unwritable_key(path, error):
+    print(f'Warning: could not write the session key to {path} ({error}); sessions will reset on restart.')
+
+
+def load_or_create_secret_key(path):
+    """Return this install's session signing key, creating one on first run.
+
+    A predictable key would let anyone mint a session cookie containing arbitrary
+    chat HTML, bypassing the server entirely, so there is deliberately no constant
+    fallback: an environment variable wins, otherwise the per-install key file is
+    reused, otherwise a new key is generated and stored beside it.
+    """
+    env_key = os.environ.get('COURT_SECRET_KEY') or os.environ.get('BETTEN_SECRET_KEY')
+    if env_key:
+        return env_key
+
+    stored = _read_key_file(path)
+    if len(stored) >= KEY_MIN_LENGTH:
+        return stored
+
+    key = secrets.token_hex(32)
+    try:
+        # O_EXCL makes exactly one process the creator of the key file.
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # Another process owns the file. Give it a moment to finish writing
+        # instead of truncating a key it has already handed to its sessions.
+        for _ in range(10):  # ~0.5s, far longer than writing 65 bytes takes
+            stored = _read_key_file(path)
+            if len(stored) >= KEY_MIN_LENGTH:
+                return stored
+            time.sleep(0.05)
+        # Still unusable after that: a torn write or a leftover placeholder.
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_TRUNC, 0o600)
+        except OSError as error:
+            _warn_unwritable_key(path, error)
+            return key
+    except OSError as error:
+        _warn_unwritable_key(path, error)
+        return key
+    with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
+        handle.write(key + '\n')
+    return key
+
+
+app.secret_key = load_or_create_secret_key(SECRET_KEY_FILE)
+
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
@@ -21,7 +89,6 @@ OLLAMA_EMBED_URL = "http://localhost:11434/api/embeddings"
 MODEL = os.environ.get('COURT_MODEL') or os.environ.get('BETTEN_MODEL', 'godmoded/llama3-lexi-uncensored:latest')
 EMBED_MODEL = os.environ.get('COURT_EMBED_MODEL', 'nomic-embed-text:latest')
 DATA_FILE = os.path.join(app.root_path, 'storage.json')
-USER_DB_FILE = os.path.join(app.root_path, 'users.db')
 RAG_FILE = os.path.join(app.root_path, 'rag_store.json')
 MAX_RAG_FILE_BYTES = 2 * 1024 * 1024
 DEFAULT_SYSTEM_PROMPT = (

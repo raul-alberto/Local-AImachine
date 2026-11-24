@@ -240,7 +240,7 @@ To create a local Windows package and installer:
    ```
 3. After building, open `BettenAIInstaller.iss` in Inno Setup and compile it to generate a Windows installer.
 4. Make sure Ollama is installed locally and the model is downloaded before distributing the app.
-5. For production, set a secure `COURT_SECRET_KEY` environment variable instead of using the default development placeholder.
+5. Court generates a per-install session key in `.court_secret` on first run. Set `COURT_SECRET_KEY` to supply your own instead.
 
 ## Project Structure
 
