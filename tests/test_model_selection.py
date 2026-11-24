@@ -20,6 +20,7 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setattr(court, 'USER_DB_FILE', str(tmp_path / 'users.db'))
     monkeypatch.setattr(court, 'DATA_FILE', str(tmp_path / 'storage.json'))
     monkeypatch.setattr(court, 'RAG_FILE', str(tmp_path / 'rag_store.json'))
+    court._INSTALLED_MODELS.update(available=False, names=(), expires_at=0.0)
     court.init_user_db()
     court.create_user('alice', 'password123', 'Alice')
     court.create_user('bob', 'password123', 'Bob')
@@ -191,6 +192,146 @@ def test_model_endpoints_require_sign_in(db, method, path):
     )
 
     assert response.status_code == 401
+
+
+def test_a_latest_tag_matches_the_bare_name(db, monkeypatch):
+    installed(monkeypatch, 'court-refusal-v1:latest')
+    monkeypatch.setattr(court, 'MODEL', 'court-refusal-v1')
+
+    client = signed_in('alice')
+    models = client.get('/api/models').get_json()
+    health = client.get('/api/health').get_json()
+
+    assert models['selected'] == 'court-refusal-v1:latest'
+    assert health['model'] == 'court-refusal-v1:latest'
+    assert health['model_installed'] is True
+
+
+def test_chat_uses_the_installed_tag_for_a_bare_default(db, monkeypatch):
+    installed(monkeypatch, 'court-refusal-v1:latest')
+    monkeypatch.setattr(court, 'MODEL', 'court-refusal-v1')
+    sent = captured_payloads(monkeypatch)
+
+    signed_in('alice').post('/api/chat', json={'message': 'hi'})
+
+    assert sent[0]['model'] == 'court-refusal-v1:latest'
+
+
+def test_selecting_the_bare_name_stores_the_installed_tag(db, monkeypatch):
+    installed(monkeypatch, 'court-refusal-v1:latest')
+
+    response = select(signed_in('alice'), 'court-refusal-v1')
+
+    assert response.status_code == 200
+    assert response.get_json()['model'] == 'court-refusal-v1:latest'
+    assert court.get_user_settings('alice')['model'] == 'court-refusal-v1:latest'
+
+
+def test_a_missing_model_error_says_how_to_fix_it(db, monkeypatch):
+    installed(monkeypatch, 'llama3:latest')
+
+    class MissingModelResponse:
+        status_code = 404
+
+        def raise_for_status(self):
+            raise court.requests.exceptions.HTTPError(
+                '404 Client Error', response=self,
+            )
+
+        def json(self):
+            return {'error': f"model '{court.MODEL}' not found"}
+
+    monkeypatch.setattr(
+        court.requests, 'post', lambda url, **kwargs: MissingModelResponse(),
+    )
+
+    data = signed_in('alice').post('/api/chat', json={'message': 'hi'}).get_json()
+
+    assert 'cannot use the model' in data['response']
+    assert 'not found' in data['response']
+    assert f'"{court.MODEL}"' in data['response']
+    assert 'Installed: llama3:latest.' in data['response']
+
+
+def missing_model_error(detail="model 'nope' not found"):
+    class MissingModelResponse:
+        status_code = 404
+
+        def json(self):
+            return {'error': detail}
+
+    return court.requests.exceptions.HTTPError('404 Client Error', response=MissingModelResponse())
+
+
+def test_the_error_shows_the_name_tried_next_to_the_installed_ones():
+    message = court.ollama_error_message(
+        missing_model_error(),
+        'court-refusal-v1',
+        ['court-refusal-v1:latest', 'llama3:latest'],
+    )
+
+    assert message.startswith('Error: Ollama cannot use the model "court-refusal-v1"')
+    assert 'Installed: court-refusal-v1:latest, llama3:latest.' in message
+    assert len(message) < 220
+
+
+def test_a_long_installed_list_is_capped_for_the_bubble():
+    names = [f'model-{index}:latest' for index in range(court.MAX_REPORTED_MODELS + 3)]
+
+    message = court.ollama_error_message(missing_model_error(), 'nope', names)
+
+    assert 'model-0:latest' in message
+    assert 'and 3 more' in message
+    assert names[-1] not in message
+
+
+def test_the_error_says_when_ollama_reports_nothing_installed():
+    message = court.ollama_error_message(missing_model_error(), 'nope', [])
+
+    assert 'Installed: none reported.' in message
+
+
+def test_health_reuses_one_lookup_and_the_picker_forces_a_fresh_one(db, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        court, 'is_ollama_available',
+        lambda: (calls.append(1), (True, {'models': [{'name': court.MODEL}]}))[1],
+    )
+
+    client = signed_in('alice')
+    client.get('/api/health')
+    health = client.get('/api/health').get_json()
+    assert len(calls) == 1
+    assert health['model'] == court.MODEL
+    assert health['model_installed'] is True
+
+    client.get('/api/models')
+    assert len(calls) == 2
+
+
+def test_an_offline_ollama_is_probed_once_per_window(db, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        court, 'is_ollama_available', lambda: (calls.append(1), (False, {}))[1],
+    )
+
+    client = signed_in('alice')
+    first = client.get('/api/health').get_json()
+    second = client.get('/api/health').get_json()
+
+    assert len(calls) == 1
+    assert first['ollama_available'] is False
+    assert second['ollama_available'] is False
+    assert second['model_installed'] is False
+
+
+def test_chat_still_sends_the_stored_model_when_ollama_is_offline(db, monkeypatch):
+    offline(monkeypatch)
+    sent = captured_payloads(monkeypatch)
+
+    signed_in('alice').post('/api/chat', json={'message': 'hi'})
+
+    assert sent[0]['model'] == court.MODEL
 
 
 def test_payload_uses_the_given_model_and_falls_back_otherwise(db):

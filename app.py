@@ -258,6 +258,14 @@ def normalize_model_name(name):
         return ''
     name = name.strip()
     return name if MODEL_NAME_PATTERN.match(name) else ''
+
+
+def canonical_model_name(name):
+    """A model name without the ':latest' tag Ollama implies."""
+    name = normalize_model_name(name)
+    return name[:-len(':latest')] if name.endswith(':latest') else name
+
+
 DATA_FILE = os.path.join(app.root_path, 'storage.json')
 RAG_FILE = os.path.join(app.root_path, 'rag_store.json')
 MAX_RAG_FILE_BYTES = 2 * 1024 * 1024
@@ -757,17 +765,59 @@ def save_user_settings(username, system_prompt, generation_settings, profile, pr
     save_storage(storage)
 
 
+_INSTALLED_MODELS = {'available': False, 'names': (), 'expires_at': 0.0}
+# Long enough that a burst of requests shares one lookup, short enough that a
+# newly pulled model appears while the picker is open.
+INSTALLED_MODELS_TTL_SECONDS = 5.0
+OLLAMA_DOWN_TTL_SECONDS = 2.0
+
+
+def installed_names_from_payload(tags_payload):
+    """The model names Ollama reports, de-duplicated, in Ollama's order."""
+    models = (tags_payload or {}).get('models', [])
+    names = (normalize_model_name(entry.get('name')) for entry in models if isinstance(entry, dict))
+    return list(dict.fromkeys(name for name in names if name))
+
+
+def installed_models(force=False):
+    """(ollama_available, installed names), cached briefly.
+
+    Every chat request has to resolve its model name against this list, so the
+    answer is reused instead of asking Ollama once per lookup.
+    """
+    cache = _INSTALLED_MODELS
+    now = time.monotonic()
+    if force or now >= cache['expires_at']:
+        available, tags_payload = is_ollama_available()
+        cache.update(
+            available=available,
+            names=tuple(installed_names_from_payload(tags_payload) if available else ()),
+            # Keep a failure short so a started Ollama is picked up quickly.
+            expires_at=now + (INSTALLED_MODELS_TTL_SECONDS if available else OLLAMA_DOWN_TTL_SECONDS),
+        )
+    return cache['available'], list(cache['names'])
+
+
+def resolve_installed_model(name, installed_names):
+    """The installed spelling of a model name, ignoring an implied ':latest' tag."""
+    wanted = canonical_model_name(name)
+    if not wanted:
+        return ''
+    for candidate in installed_names:
+        if canonical_model_name(candidate) == wanted:
+            return candidate
+    return ''
+
+
 def get_selected_model(username):
-    """The model this account picked, or the install default."""
+    """The model this account picked, spelled as installed, or the install default."""
+    chosen = ''
     if has_request_context():
         chosen = normalize_model_name(session.get('model'))
-        if chosen:
-            return chosen
-    if username:
+    if not chosen and username:
         chosen = normalize_model_name(get_user_settings(username).get('model'))
-        if chosen:
-            return chosen
-    return MODEL
+    chosen = chosen or normalize_model_name(MODEL) or MODEL
+    return resolve_installed_model(chosen, installed_models()[1]) or chosen
 
 
 def save_user_model(username, model_name):
@@ -1126,6 +1176,43 @@ def is_ollama_available():
     except Exception:
         return False, {}
 
+
+# Enough names to spot a tag mismatch without turning the bubble into a list.
+MAX_REPORTED_MODELS = 8
+
+
+def reported_model_names(installed_names):
+    """Installed names as one short list a chat bubble can hold."""
+    names = list(installed_names)
+    if not names:
+        return 'none reported'
+    if len(names) <= MAX_REPORTED_MODELS:
+        return ', '.join(names)
+    extra = len(names) - MAX_REPORTED_MODELS
+    return ', '.join(names[:MAX_REPORTED_MODELS]) + f', and {extra} more'
+
+
+def ollama_error_message(exc, model_name, installed_names=()):
+    """Ollama's own reason for rejecting a model, plus the names it does have."""
+    response = getattr(exc, 'response', None)
+    if response is None or response.status_code != 404:
+        return f'Error: AI request failed ({exc})'
+    detail = ''
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        detail = str(payload.get('error') or '').strip()
+    if detail and not detail.endswith(('.', '!', '?')):
+        detail += '.'
+    reason = f': {detail}' if detail else '.'
+    return (
+        f'Error: Ollama cannot use the model "{model_name}"{reason} '
+        f'Installed: {reported_model_names(installed_names)}. '
+        f'Pick one in the header.'
+    )
+
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_ADDRESS_MAX_ATTEMPTS = 20
 REGISTER_MAX_ATTEMPTS = 10
@@ -1465,7 +1552,8 @@ def api_chat():
     # tail so the model always ends on the question it is answering.
     history = format_history_for_prompt(chats[current_index]['messages'][:-1])
     prompt_payload = build_chat_prompt(system_prompt, history, user_message, rag_context)
-    payload = build_ollama_payload(prompt_payload, generation_settings, stream=False, model_name=get_selected_model(username))
+    selected_model = get_selected_model(username)
+    payload = build_ollama_payload(prompt_payload, generation_settings, stream=False, model_name=selected_model)
     try:
         response = requests.post(OLLAMA_URL, json=payload, timeout=120)
         response.raise_for_status()
@@ -1479,7 +1567,7 @@ def api_chat():
         formatted_response = 'Error: AI response timed out. Please try again or allow more time for longer code answers.'
         message_type = 'error'
     except requests.exceptions.RequestException as e:
-        formatted_response = f'Error: AI request failed ({e})'
+        formatted_response = ollama_error_message(e, selected_model, installed_models()[1])
         message_type = 'error'
     except ValueError:
         formatted_response = 'Error: Invalid response from AI service.'
@@ -1515,7 +1603,8 @@ def api_chat_stream():
     rag_context, rag_sources = build_rag_context(username, user_message)
     history = format_history_for_prompt(chats[current_index]['messages'][:-1])
     prompt_payload = build_chat_prompt(system_prompt, history, user_message, rag_context)
-    payload = build_ollama_payload(prompt_payload, generation_settings, stream=True, model_name=get_selected_model(username))
+    selected_model = get_selected_model(username)
+    payload = build_ollama_payload(prompt_payload, generation_settings, stream=True, model_name=selected_model)
 
     @stream_with_context
     def generate():
@@ -1546,7 +1635,10 @@ def api_chat_stream():
                 'sources': rag_sources,
             }, ensure_ascii=False) + '\n'
         except Exception as e:
-            error_message = f'Error: AI request failed ({e})'
+            if isinstance(e, requests.exceptions.RequestException):
+                error_message = ollama_error_message(e, selected_model, installed_models()[1])
+            else:
+                error_message = f'Error: AI request failed ({e})'
             chats[current_index]['messages'].append({'type': 'error', 'message': error_message, 'sources': []})
             save_chats(username, chats)
             yield json.dumps({'type': 'error', 'message': error_message}, ensure_ascii=False) + '\n'
@@ -1659,14 +1751,12 @@ def api_health():
     if not session.get('logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
 
-    available, tags_payload = is_ollama_available()
-    installed_models = [m.get('name', '') for m in tags_payload.get('models', [])] if available else []
+    available, installed = installed_models()
     selected = get_selected_model(get_username_from_session())
     return jsonify({
         'ollama_available': available,
         'model': selected,
-        'model_installed': selected in installed_models,
-        'models': installed_models,
+        'model_installed': selected in installed,
         'embedding_model': EMBED_MODEL,
         'user': session.get('username', 'local-user'),
     })
@@ -1677,22 +1767,13 @@ def api_models():
     """List the models pulled on this machine, plus this account's choice."""
     if not session.get('logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
-    available, tags_payload = is_ollama_available()
-    models = []
-    if available:
-        for entry in tags_payload.get('models', []):
-            if not isinstance(entry, dict):
-                continue
-            name = normalize_model_name(entry.get('name'))
-            if name and all(model['name'] != name for model in models):
-                models.append({'name': name, 'size': entry.get('size')})
-    models.sort(key=lambda model: model['name'].lower())
+    # The picker opens on demand, so read the list fresh to show new pulls.
+    available, installed = installed_models(force=True)
     return jsonify({
         'success': True,
         'ollama_available': available,
-        'models': models,
+        'models': [{'name': name} for name in sorted(installed, key=str.lower)],
         'selected': get_selected_model(get_username_from_session()),
-        'default_model': MODEL,
     })
 
 
@@ -1702,19 +1783,15 @@ def api_select_model():
     if not session.get('logged_in'):
         return jsonify({'error': 'Unauthorized'}), 401
     data = request.get_json() or {}
-    name = normalize_model_name(data.get('model'))
-    if not name:
+    requested = normalize_model_name(data.get('model'))
+    if not requested:
         return jsonify({'error': 'Choose a model from the installed list.'}), 400
-    available, tags_payload = is_ollama_available()
+    available, installed = installed_models(force=True)
     if not available:
         return jsonify({'error': 'Ollama is not running, so the model list is unavailable.'}), 503
-    installed = {
-        normalize_model_name(entry.get('name'))
-        for entry in tags_payload.get('models', [])
-        if isinstance(entry, dict)
-    }
-    if name not in installed:
-        return jsonify({'error': f'{name} is not installed. Run: ollama pull {name}'}), 400
+    name = resolve_installed_model(requested, installed)
+    if not name:
+        return jsonify({'error': f'{requested} is not installed. Run: ollama pull {requested}'}), 400
     session['model'] = name
     save_user_model(get_username_from_session(), name)
     return jsonify({'success': True, 'model': name})
