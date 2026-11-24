@@ -225,6 +225,7 @@ In Settings:
    - `Persistent`: chats are saved locally per user.
 2. Use `Wipe local data` to clear chats, indexed docs, and reset settings for the current account.
 3. Failed logins are throttled: after 5 misses from the same address and username within 15 minutes, sign-in is locked for 60 seconds, doubling on each further miss.
+4. Behind a TLS-terminating reverse proxy, put the proxy's address in `COURT_TRUSTED_PROXIES` (comma-separated, e.g. `127.0.0.1`). Court then reads `X-Forwarded-Proto`, `X-Forwarded-Host` and `X-Forwarded-Port` for its Origin check, and `X-Forwarded-For` for login throttling, instead of the plain-HTTP hop the proxy sends it. Leave it unset when Court is reached directly, otherwise any client could forge those headers.
 
 ## Packaging
 

@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash, make_response, Response, stream_with_context
 import argparse
 import getpass
+import ipaddress
 import sys
 import requests
 import os
@@ -105,15 +106,96 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=SESSION_LIFETIME,
 )
 
+def normalize_address(value):
+    """Return a canonical IP string, or '' when the value is not an address."""
+    try:
+        return ipaddress.ip_address((value or '').strip()).compressed
+    except ValueError:
+        return ''
+
+
+def parse_trusted_proxies(raw):
+    """Parse the comma-separated proxy allowlist, dropping anything malformed."""
+    proxies = set()
+    for entry in (raw or '').split(','):
+        entry = entry.strip()
+        if not entry:
+            continue
+        address = normalize_address(entry)
+        if not address:
+            print(f'Warning: ignoring invalid COURT_TRUSTED_PROXIES entry "{entry}".')
+            continue
+        proxies.add(address)
+    return frozenset(proxies)
+
+
+# A TLS-terminating proxy talks plain HTTP to Court, so Flask alone reports
+# http://127.0.0.1:5000 while the browser's Origin says https://court.example.
+# The forwarded headers repair that, but only for peers listed here: anyone who
+# can reach Court directly would otherwise be free to set X-Forwarded-For and
+# dodge the login throttle.
+TRUSTED_PROXIES = parse_trusted_proxies(os.environ.get('COURT_TRUSTED_PROXIES', ''))
+
+
+def direct_peer_address():
+    """The address Court itself sees, before any forwarded header."""
+    return request.environ.get('REMOTE_ADDR') or ''
+
+
+def is_trusted_proxy():
+    return normalize_address(direct_peer_address()) in TRUSTED_PROXIES
+
+
+def forwarded_value(header):
+    """Return the last hop of a forwarded header.
+
+    Each proxy appends to these headers, so the final entry is the one the
+    trusted proxy wrote; earlier entries are whatever the client sent and must
+    not be believed even when the immediate peer is trusted.
+    """
+    return request.headers.get(header, '').rsplit(',', 1)[-1].strip()
+
+
+def client_address():
+    """The caller's address, taken from a trusted proxy's X-Forwarded-For."""
+    peer = direct_peer_address()
+    if not is_trusted_proxy():
+        return peer
+    return normalize_address(forwarded_value('X-Forwarded-For')) or peer
+
+
+def origin_base():
+    """The scheme and host the browser used for this request.
+
+    A direct caller gets Flask's own view, so forwarded headers cannot widen
+    the Origin check. Behind a trusted proxy they are the only source of the
+    public scheme and host, because the proxy is what terminated TLS.
+    """
+    scheme, host = request.scheme, request.host
+    if not is_trusted_proxy():
+        return scheme, host
+    forwarded_scheme = forwarded_value('X-Forwarded-Proto').lower()
+    if forwarded_scheme in ('http', 'https'):
+        scheme = forwarded_scheme
+    host = forwarded_value('X-Forwarded-Host') or host
+    if ':' not in host:
+        port = forwarded_value('X-Forwarded-Port')
+        if port.isdigit() and port != ('443' if scheme == 'https' else '80'):
+            host = f'{host}:{port}'
+    return scheme, host
+
+
 @app.before_request
 def reject_cross_origin_writes():
     """Reject browser writes that come from another site.
 
     A missing Origin means a non-browser caller (curl, scripts, tests), which a
     web page cannot imitate, so those keep working. Like any Origin check this
-    compares against the Host the request arrived with, so a page that rebinds
+    compares against the address the request arrived for, so a page that rebinds
     its own hostname to loopback presents its own host in both headers and is
-    not caught here; blocking that case needs a host allowlist.
+    not caught here; blocking that case needs a host allowlist. Behind a
+    trusted reverse proxy the comparison uses the forwarded scheme and host,
+    which is what the browser actually addressed.
     """
     if request.method in ('GET', 'HEAD', 'OPTIONS'):
         return None
@@ -121,8 +203,7 @@ def reject_cross_origin_writes():
     if not origin:
         return None
     parsed = urlsplit(origin)
-    expected = urlsplit(request.host_url)
-    if (parsed.scheme, parsed.netloc) != (expected.scheme, expected.netloc):
+    if (parsed.scheme, parsed.netloc) != origin_base():
         return jsonify({'error': 'Cross-origin request rejected'}), 403
     return None
 
@@ -1012,7 +1093,7 @@ def login():
     if request.method == 'POST':
         username = (request.form.get('username') or '').strip()
         password = request.form.get('password') or ''
-        address = request.remote_addr or 'local'
+        address = client_address() or 'local'
         attempt_key = f'account:{address}:{username.lower()}'
         address_key = f'address:{address}'
         lock_seconds = max(login_lock_seconds(attempt_key), login_lock_seconds(address_key))
