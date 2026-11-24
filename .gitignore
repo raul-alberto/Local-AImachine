@@ -207,6 +207,9 @@ llama.cpp/
 
 # Local app state
 users.db
+
+# Screenshots captured during local verification
+artifacts/
 rag_store.json
 storage.json
 .court_secret
