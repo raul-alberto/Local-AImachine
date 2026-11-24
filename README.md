@@ -224,8 +224,8 @@ In Settings:
    - `Ephemeral`: chats are deleted from this device when you log out.
    - `Persistent`: chats are saved locally per user.
 2. Use `Wipe local data` to clear chats, indexed docs, and reset settings for the current account.
-3. Failed logins are throttled: after 5 misses from the same address and username within 15 minutes, sign-in is locked for 60 seconds, doubling on each further miss.
-4. Behind a TLS-terminating reverse proxy, put the proxy's address in `COURT_TRUSTED_PROXIES` (comma-separated, e.g. `127.0.0.1`). Court then reads `X-Forwarded-Proto`, `X-Forwarded-Host` and `X-Forwarded-Port` for its Origin check, and `X-Forwarded-For` for login throttling, instead of the plain-HTTP hop the proxy sends it. Leave it unset when Court is reached directly, otherwise any client could forge those headers.
+3. Failed logins are throttled: after 5 misses from the same address and username within 15 minutes, sign-in is locked for 60 seconds, doubling on each further miss. The tally is stored in `users.db`, so restarting Court or running several workers does not clear a lock. Registration attempts are throttled the same way, at 10 per address within 15 minutes.
+4. Behind a TLS-terminating reverse proxy, put the proxy's address in `COURT_TRUSTED_PROXIES` (comma-separated, e.g. `127.0.0.1`). Court then reads `X-Forwarded-Proto`, `X-Forwarded-Host` and `X-Forwarded-Port` for its Origin check and to mark the session cookie `Secure` on https requests, and `X-Forwarded-For` for login throttling, instead of the plain-HTTP hop the proxy sends it. Leave it unset when Court is reached directly, otherwise any client could forge those headers.
 
 ## Packaging
 
@@ -281,5 +281,17 @@ python app.py --reset-password <username>
 
 It prompts for the new password twice, so it never appears in your shell
 history, and signs out any sessions already open for that account.
+
+This is the recovery path for an account you can no longer sign in to. Deleting
+the account is not: it removes the chats, indexed documents and settings with
+it, and re-registering the same username starts empty.
+
+### Delete an account
+
+A signed-in user can delete their own account from **Change password → Delete
+account**. It asks for the current password, then removes the account row, its
+chats, its indexed documents and its saved settings from this machine. There is
+no undo and no backup of that data, and other accounts on the same install keep
+their own chats and documents.
 
 Enjoy your creative AI companion!

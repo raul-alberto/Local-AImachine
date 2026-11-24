@@ -16,10 +16,46 @@ import app as court  # noqa: E402  (path bootstrap must run first)
 
 
 @pytest.fixture(autouse=True)
-def clean_throttle():
-    court._login_failures.clear()
+def clean_throttle(db):
+    court.clear_all_login_failures()
     yield
-    court._login_failures.clear()
+    court.clear_all_login_failures()
+
+
+def throttle_rows():
+    conn = court._connect_user_db()
+    try:
+        return {
+            row['key']: dict(row)
+            for row in conn.execute('SELECT key, count, first_seen, locked_until FROM login_throttle')
+        }
+    finally:
+        conn.close()
+
+
+def seed_throttle(key, count, first_seen, locked_until):
+    conn = court._connect_user_db()
+    try:
+        with conn:
+            conn.execute(
+                'INSERT OR REPLACE INTO login_throttle (key, count, first_seen, locked_until) '
+                'VALUES (?, ?, ?, ?)',
+                (key, count, first_seen, locked_until),
+            )
+    finally:
+        conn.close()
+
+
+def expire_locks(key_pattern='%'):
+    conn = court._connect_user_db()
+    try:
+        with conn:
+            conn.execute(
+                'UPDATE login_throttle SET locked_until = ? WHERE key LIKE ?',
+                (court.time.time() - 1.0, key_pattern),
+            )
+    finally:
+        conn.close()
 
 
 @pytest.fixture
@@ -108,8 +144,7 @@ def test_lock_expires_after_the_window(db):
     assert login(client, 'correct-horse').status_code == 429
 
     # Let the lock elapse without waiting a real minute.
-    for entry in court._login_failures.values():
-        entry['locked_until'] = court.time.time() - 1
+    expire_locks()
 
     unlocked = login(client, 'correct-horse')
 
@@ -120,20 +155,19 @@ def test_lock_expires_after_the_window(db):
 def test_stale_throttle_entries_are_pruned_but_live_locks_survive(db):
     now = court.time.time()
     window = court.LOGIN_WINDOW_SECONDS
-    court._login_failures.update({
-        'old:alice': {'count': 2, 'first': now - window - 1, 'locked_until': 0},
-        'recent:bob': {'count': 1, 'first': now, 'locked_until': 0},
-        'locked:carol': {'count': 5, 'first': now - window - 1, 'locked_until': now + 60},
-    })
+    seed_throttle('old:alice', 2, now - window - 1, 0)
+    seed_throttle('recent:bob', 1, now, 0)
+    seed_throttle('locked:carol', 5, now - window - 1, now + 60)
 
     court.record_login_failure('new:dave')
 
-    assert 'old:alice' not in court._login_failures
-    assert 'recent:bob' in court._login_failures
+    rows = throttle_rows()
+    assert 'old:alice' not in rows
+    assert 'recent:bob' in rows
     # A lock that outlasted its counting window must still be enforced.
-    assert 'locked:carol' in court._login_failures
+    assert 'locked:carol' in rows
     assert court.login_lock_seconds('locked:carol') > 0
-    assert court._login_failures['new:dave']['count'] == 1
+    assert rows['new:dave']['count'] == 1
 
 
 def test_successful_login_clears_only_the_account_counter(db):
@@ -142,15 +176,16 @@ def test_successful_login_clears_only_the_account_counter(db):
 
     for _ in range(3):
         login(client, 'wrong-password')
-    assert court._login_failures
+    assert throttle_rows()
 
     response = login(client, 'correct-horse')
 
     assert response.status_code == 302
-    assert not any(key.startswith('account:') for key in court._login_failures)
+    rows = throttle_rows()
+    assert not any(key.startswith('account:') for key in rows)
     # The address tally survives, so one valid login cannot flush a spray.
     address_entry = next(
-        entry for key, entry in court._login_failures.items() if key.startswith('address:')
+        entry for key, entry in rows.items() if key.startswith('address:')
     )
     assert address_entry['count'] == 3
 
@@ -169,7 +204,7 @@ def test_cycling_usernames_hits_the_address_limit(db):
     assert b'Too many failed attempts' in blocked.data
     # No single account got close to its own limit; the address tally did it.
     account_counts = [
-        entry['count'] for key, entry in court._login_failures.items()
+        entry['count'] for key, entry in throttle_rows().items()
         if key.startswith('account:')
     ]
     assert max(account_counts) == 1
@@ -199,9 +234,7 @@ def test_address_lock_expires(db):
         login(client, 'wrong-password', username=f'user{index}')
     assert login(client, 'correct-horse').status_code == 429
 
-    for key, entry in court._login_failures.items():
-        if key.startswith('address:'):
-            entry['locked_until'] = court.time.time() - 1
+    expire_locks('address:%')
 
     allowed = login(client, 'correct-horse')
     assert allowed.status_code == 302

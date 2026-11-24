@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash, make_response, Response, stream_with_context
+from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash, make_response, Response, stream_with_context, has_request_context
+from flask.sessions import SecureCookieSessionInterface
 import argparse
 import getpass
 import ipaddress
@@ -183,6 +184,28 @@ def origin_base():
         if port.isdigit() and port != ('443' if scheme == 'https' else '80'):
             host = f'{host}:{port}'
     return scheme, host
+
+
+def is_https_request():
+    """True when the browser reached Court over https, directly or by proxy."""
+    return origin_base()[0] == 'https'
+
+
+class CourtSessionInterface(SecureCookieSessionInterface):
+    """Mark the session cookie Secure on requests that arrived over https.
+
+    A fixed flag cannot describe this install: the same process is plain http on
+    the LAN and https through a trusted proxy, and only the forwarded headers
+    know which one a given request used.
+    """
+
+    def get_cookie_secure(self, app):
+        if has_request_context() and is_https_request():
+            return True
+        return super().get_cookie_secure(app)
+
+
+app.session_interface = CourtSessionInterface()
 
 
 @app.before_request
@@ -508,7 +531,7 @@ def _apply_preset(settings):
     return _coerce_generation_settings(settings)
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 USER_DB_TIMEOUT_SECONDS = 5
 
 
@@ -549,6 +572,7 @@ def init_user_db():
         )
         _ensure_user_columns(conn)
         _ensure_chat_table(conn)
+        _ensure_throttle_table(conn)
         _stamp_schema_version(conn)
         conn.commit()
     finally:
@@ -742,6 +766,19 @@ def _ensure_chat_table(conn):
     )
 
 
+def _ensure_throttle_table(conn):
+    conn.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS login_throttle (
+            key TEXT PRIMARY KEY,
+            count INTEGER NOT NULL,
+            first_seen REAL NOT NULL,
+            locked_until REAL NOT NULL
+        )
+        '''
+    )
+
+
 def _connect_chat_db():
     conn = _connect_user_db()
     _ensure_chat_table(conn)
@@ -826,6 +863,42 @@ def delete_chats(username):
     try:
         with conn:
             conn.execute('DELETE FROM chats WHERE user_id = ?', (user_id,))
+    finally:
+        conn.close()
+
+
+def delete_user_rag(username):
+    """Drop this user's indexed documents from the shared RAG store."""
+    rag_store = load_rag_store()
+    users = rag_store.get('users', {})
+    if isinstance(users, dict) and users.pop(username, None) is not None:
+        save_rag_store(rag_store)
+
+
+def delete_user_settings(username):
+    """Drop this user's saved settings and profile from storage.json."""
+    storage = load_storage()
+    users = storage.get('users', {})
+    if isinstance(users, dict) and users.pop(username, None) is not None:
+        save_storage(storage)
+
+
+def delete_user(username):
+    """Delete an account and everything stored for it.
+
+    Chats are keyed by the user row's id, so they go before the row; settings
+    and RAG documents live in shared JSON stores keyed by username. There is no
+    undo, and no other account's data is touched.
+    """
+    if not username:
+        return
+    delete_chats(username)
+    delete_user_rag(username)
+    delete_user_settings(username)
+    conn = _connect_user_db()
+    try:
+        with conn:
+            conn.execute('DELETE FROM users WHERE username = ?', (username,))
     finally:
         conn.close()
 
@@ -1014,48 +1087,109 @@ def is_ollama_available():
 
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_ADDRESS_MAX_ATTEMPTS = 20
+REGISTER_MAX_ATTEMPTS = 10
 LOGIN_WINDOW_SECONDS = 900
-_login_failures = {}
 
 
 def login_lock_seconds(key):
-    entry = _login_failures.get(key)
-    return max(0, math.ceil(entry['locked_until'] - time.time())) if entry else 0
+    """Seconds left on a key's lock, or 0 when it is not locked."""
+    conn = _connect_user_db()
+    try:
+        row = conn.execute(
+            'SELECT locked_until FROM login_throttle WHERE key = ?', (key,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return max(0, math.ceil(row['locked_until'] - time.time())) if row else 0
 
 
-def _login_window_passed(entry, now):
-    return now - entry['first'] > LOGIN_WINDOW_SECONDS
+def _login_window_passed(row, now):
+    return now - row['first_seen'] > LOGIN_WINDOW_SECONDS
 
 
-def prune_login_failures(now):
+def _prune_login_failures(conn, now):
+    conn.execute(
+        'DELETE FROM login_throttle WHERE first_seen < ? AND locked_until <= ?',
+        (now - LOGIN_WINDOW_SECONDS, now),
+    )
+
+
+def prune_login_failures(now=None):
     """Forget keys whose window passed, unless their lock is still running.
 
-    Without this the table keeps one entry per address and username forever on
+    Without pruning the table keeps one row per address and username forever on
     a long-running exposed instance. A lock set late in the window can outlive
-    it, so an active lock keeps its entry.
+    it, so an active lock keeps its row.
     """
-    for stale_key, entry in list(_login_failures.items()):
-        if _login_window_passed(entry, now) and entry['locked_until'] <= now:
-            del _login_failures[stale_key]
+    now = time.time() if now is None else now
+    conn = _connect_user_db()
+    try:
+        with conn:
+            _prune_login_failures(conn, now)
+    finally:
+        conn.close()
+
+
+def clear_login_failure(key):
+    """Forget one key's tally, e.g. after a successful sign-in."""
+    conn = _connect_user_db()
+    try:
+        with conn:
+            conn.execute('DELETE FROM login_throttle WHERE key = ?', (key,))
+    finally:
+        conn.close()
+
+
+def clear_all_login_failures():
+    """Drop every tally, for an operator reset or a test starting clean."""
+    conn = _connect_user_db()
+    try:
+        with conn:
+            conn.execute('DELETE FROM login_throttle')
+    finally:
+        conn.close()
 
 
 def record_login_failure(key, limit=LOGIN_MAX_ATTEMPTS):
-    """Count a miss against a key, locking it once the limit is reached.
+    """Count an attempt against a key, locking it once the limit is reached.
 
     The same table holds per-account keys and one aggregate key per address, so
-    an attacker cycling usernames still has to pay for every guess.
+    an attacker cycling usernames still has to pay for every guess. Rows live
+    in users.db instead of a dict so a restart or a second worker cannot forget
+    a lock; BEGIN IMMEDIATE serializes the read-modify-write between them.
     """
     now = time.time()
-    prune_login_failures(now)
-    entry = _login_failures.get(key)
-    if not entry or _login_window_passed(entry, now):
-        entry = {'count': 0, 'first': now, 'locked_until': 0}
-    entry['count'] += 1
-    if entry['count'] >= limit:
-        # 60s at the limit, doubling for each further miss (max 15 min).
-        lock = 60 * 2 ** (entry['count'] - limit)
-        entry['locked_until'] = now + min(lock, LOGIN_WINDOW_SECONDS)
-    _login_failures[key] = entry
+    conn = _connect_user_db()
+    conn.isolation_level = None
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        _prune_login_failures(conn, now)
+        row = conn.execute(
+            'SELECT count, first_seen FROM login_throttle WHERE key = ?', (key,)
+        ).fetchone()
+        if row and not _login_window_passed(row, now):
+            count, first_seen = row['count'], row['first_seen']
+        else:
+            count, first_seen = 0, now
+        count += 1
+        locked_until = 0.0
+        if count >= limit:
+            # 60s at the limit, doubling for each further miss (max 15 min).
+            locked_until = now + min(60 * 2 ** (count - limit), LOGIN_WINDOW_SECONDS)
+        conn.execute(
+            'INSERT OR REPLACE INTO login_throttle (key, count, first_seen, locked_until) '
+            'VALUES (?, ?, ?, ?)',
+            (key, count, first_seen, locked_until),
+        )
+        conn.execute('COMMIT')
+    except BaseException:
+        try:
+            conn.execute('ROLLBACK')
+        except sqlite3.Error:
+            pass
+        raise
+    finally:
+        conn.close()
 
 
 def start_user_session(user):
@@ -1103,7 +1237,7 @@ def login():
         else:
             user = get_user_by_username(username)
             if user and check_password_hash(user['password_hash'], password):
-                _login_failures.pop(attempt_key, None)
+                clear_login_failure(attempt_key)
                 return start_user_session(user)
             record_login_failure(attempt_key)
             record_login_failure(address_key, LOGIN_ADDRESS_MAX_ATTEMPTS)
@@ -1114,6 +1248,16 @@ def login():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
+        # Every attempt counts, successful or not: the point is to stop one
+        # address from farming accounts or probing which usernames exist.
+        address = client_address() or 'local'
+        register_key = f'register:{address}'
+        lock_seconds = login_lock_seconds(register_key)
+        if lock_seconds:
+            flash(f'Too many registration attempts. Try again in {lock_seconds} seconds.')
+            return render_template('register.html', initial_theme=get_preferred_theme()), 429
+        record_login_failure(register_key, REGISTER_MAX_ATTEMPTS)
+
         username = (request.form.get('username') or '').strip()
         display_name = (request.form.get('display_name') or '').strip() or username
         password = request.form.get('password') or ''
@@ -1161,6 +1305,32 @@ def change_password():
             flash('Password updated.')
             return redirect(url_for('chat'))
     return render_template('password.html', initial_theme=get_preferred_theme(), username=username)
+
+
+@app.route('/account/delete', methods=['GET', 'POST'])
+def delete_account():
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    username = get_username_from_session()
+    if request.method == 'POST':
+        password = request.form.get('password') or ''
+        user = get_user_by_username(username)
+        if not user or not check_password_hash(user['password_hash'], password):
+            flash('Password is incorrect. Nothing was deleted.')
+            return render_template(
+                'delete_account.html',
+                initial_theme=get_preferred_theme(),
+                username=username,
+            ), 400
+        delete_user(username)
+        session.clear()
+        flash('Your account and all of its data were deleted.')
+        return redirect(url_for('login'))
+    return render_template(
+        'delete_account.html',
+        initial_theme=get_preferred_theme(),
+        username=username,
+    )
 
 
 @app.route('/chat')

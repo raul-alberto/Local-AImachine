@@ -22,10 +22,18 @@ PUBLIC_ORIGIN = 'https://court.example'
 
 
 @pytest.fixture(autouse=True)
-def clean_throttle():
-    court._login_failures.clear()
+def clean_throttle(db):
+    court.clear_all_login_failures()
     yield
-    court._login_failures.clear()
+    court.clear_all_login_failures()
+
+
+def throttle_keys():
+    conn = court._connect_user_db()
+    try:
+        return [row['key'] for row in conn.execute('SELECT key FROM login_throttle')]
+    finally:
+        conn.close()
 
 
 @pytest.fixture
@@ -186,7 +194,7 @@ def test_client_supplied_forwarded_for_cannot_evade_the_throttle(db, trusted_pro
         )
 
     assert court.login_lock_seconds(f'account:{CLIENT}:alice') > 0
-    assert not any('198.51.100.' in key for key in court._login_failures)
+    assert not any('198.51.100.' in key for key in throttle_keys())
 
 
 def test_untrusted_peer_cannot_choose_its_throttle_address(db):
@@ -194,13 +202,13 @@ def test_untrusted_peer_cannot_choose_its_throttle_address(db):
         login(client_from('192.0.2.44'), headers={'X-Forwarded-For': '198.51.100.1'}, password='wrong')
 
     assert court.login_lock_seconds('account:192.0.2.44:alice') > 0
-    assert not any('198.51.100.1' in key for key in court._login_failures)
+    assert not any('198.51.100.1' in key for key in throttle_keys())
 
 
 def test_malformed_forwarded_address_falls_back_to_the_proxy_peer(db, trusted_proxy):
     login(client_from(PROXY), headers={'X-Forwarded-For': 'garbage'}, password='wrong')
 
-    assert f'account:{PROXY}:alice' in court._login_failures
+    assert f'account:{PROXY}:alice' in throttle_keys()
 
 
 def test_parse_trusted_proxies_normalizes_the_allowlist():
@@ -217,3 +225,45 @@ def test_parse_trusted_proxies_drops_malformed_entries(capsys):
 def test_nothing_is_trusted_when_the_setting_is_absent():
     assert court.parse_trusted_proxies(None) == frozenset()
     assert court.parse_trusted_proxies('') == frozenset()
+
+
+def session_cookie(response):
+    """Return the Set-Cookie header for the session, not the theme cookie."""
+    for header in response.headers.getlist('Set-Cookie'):
+        if header.startswith('session='):
+            return header
+    raise AssertionError('login did not set a session cookie')
+
+
+def test_proxied_https_login_marks_the_cookie_secure(db, trusted_proxy):
+    response = login(client_from(PROXY), headers=proxy_headers())
+
+    assert response.status_code == 302
+    assert 'Secure' in session_cookie(response)
+
+
+def test_proxied_http_login_leaves_the_cookie_unsecured(db, trusted_proxy):
+    response = login(client_from(PROXY), headers={
+        'Origin': 'http://court.example',
+        'X-Forwarded-Proto': 'http',
+        'X-Forwarded-Host': 'court.example',
+    })
+
+    assert response.status_code == 302
+    assert 'Secure' not in session_cookie(response)
+
+
+def test_plain_http_login_leaves_the_cookie_unsecured(db):
+    response = login(client_from('127.0.0.1'))
+
+    assert response.status_code == 302
+    assert 'Secure' not in session_cookie(response)
+
+
+def test_untrusted_peer_cannot_force_the_secure_flag(db):
+    # Without the fixture the forwarded scheme is ignored, so the cookie stays
+    # usable over the plain-http hop Court actually served.
+    response = login(client_from('198.51.100.9'), headers={'X-Forwarded-Proto': 'https'})
+
+    assert response.status_code == 302
+    assert 'Secure' not in session_cookie(response)

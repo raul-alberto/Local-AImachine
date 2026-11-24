@@ -1,0 +1,73 @@
+<!doctype html>
+<html
+  lang="en"
+  {% if initial_theme and initial_theme != 'crimson' %}data-theme="{{ initial_theme }}"{% endif %}
+>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Delete account - Court</title>
+    <link
+      rel="icon"
+      href="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell">
+      <section class="auth-card">
+        <div class="auth-brand">
+          <img
+            src="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
+            alt="Court logo"
+            width="44"
+            height="44"
+          />
+          <div>
+            <h1>Delete account</h1>
+            <p>This permanently deletes {{ username }} and all of its data</p>
+          </div>
+        </div>
+
+        <p>
+          Your chats, indexed documents and settings are removed with the
+          account. This cannot be undone, and there is no password reset that
+          can bring the data back.
+        </p>
+
+        <form method="post" class="auth-form">
+          <div class="field">
+            <label for="password">Confirm your password</label>
+            <input
+              class="input"
+              type="password"
+              id="password"
+              name="password"
+              required
+              autocomplete="current-password"
+              autofocus
+            />
+          </div>
+
+          <button class="btn btn-primary btn-block" type="submit">
+            Delete my account
+          </button>
+        </form>
+
+        {% with messages = get_flashed_messages() %} {% if messages %}
+        <div class="auth-feedback">{{ messages[0] }}</div>
+        {% endif %} {% endwith %}
+
+        <div class="auth-foot">
+          <a href="{{ url_for('chat') }}">Back to chat</a>
+          <span aria-hidden="true">·</span>
+          <a href="{{ url_for('change_password') }}">Change password</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
