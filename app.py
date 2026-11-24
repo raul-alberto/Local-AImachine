@@ -894,6 +894,16 @@ def sanitize_chat_history(chats):
     return cleaned
 
 
+def chats_for_json(chats):
+    """Chats as the browser should receive them.
+
+    The browser can render any chats payload (deleting a chat re-renders the
+    open one), and AI replies are stored as raw HTML from the model, so
+    sanitize at the JSON boundary instead of trusting each endpoint.
+    """
+    return sanitize_chat_history(chats)
+
+
 def format_ai_response(text):
     return sanitize_reply_html(markdown.markdown(
         text,
@@ -1159,7 +1169,7 @@ def api_chat():
     chats[current_index]['messages'].append({'type': 'ai', 'message': formatted_response, 'sources': rag_sources})
     
     save_chats(username, chats)
-    return jsonify({'response': formatted_response, 'title': chats[current_index]['title'], 'chats': chats, 'current_index': current_index, 'sources': rag_sources})
+    return jsonify({'response': formatted_response, 'title': chats[current_index]['title'], 'chats': chats_for_json(chats), 'current_index': current_index, 'sources': rag_sources})
 
 
 @app.route('/api/chat_stream', methods=['POST'])
@@ -1212,7 +1222,7 @@ def api_chat_stream():
             yield json.dumps({
                 'type': 'done',
                 'response': formatted_response,
-                'chats': chats,
+                'chats': chats_for_json(chats),
                 'current_index': current_index,
                 'sources': rag_sources,
             }, ensure_ascii=False) + '\n'
@@ -1234,7 +1244,7 @@ def new_chat():
     save_chats(username, chats)
     current_index = len(chats) - 1
     session['current_chat_index'] = current_index
-    return jsonify({'success': True, 'chats': chats, 'current_index': current_index})
+    return jsonify({'success': True, 'chats': chats_for_json(chats), 'current_index': current_index})
 
 @app.route('/api/chats', methods=['GET'])
 def api_chats():
@@ -1528,7 +1538,7 @@ def rename_chat(index):
         return jsonify({'error': 'Invalid chat index'}), 400
     chats[index]['title'] = new_title
     save_chats(username, chats)
-    return jsonify({'success': True, 'chats': chats})
+    return jsonify({'success': True, 'chats': chats_for_json(chats)})
 
 @app.route('/api/delete_chat/<int:index>', methods=['POST'])
 def delete_chat(index):
@@ -1542,7 +1552,7 @@ def delete_chat(index):
     new_index = len(chats) - 1
     save_chats(username, chats)
     session['current_chat_index'] = new_index if new_index >= 0 else -1
-    return jsonify({'success': True, 'chats': chats, 'current_index': session['current_chat_index']})
+    return jsonify({'success': True, 'chats': chats_for_json(chats), 'current_index': session['current_chat_index']})
 
 @app.route('/api/add_tag/<int:index>', methods=['POST'])
 def add_tag(index):
@@ -1561,7 +1571,7 @@ def add_tag(index):
     if tag not in chats[index]['tags']:
         chats[index]['tags'].append(tag)
     save_chats(username, chats)
-    return jsonify({'success': True, 'chats': chats})
+    return jsonify({'success': True, 'chats': chats_for_json(chats)})
 
 @app.route('/api/remove_tag/<int:index>', methods=['POST'])
 def remove_tag(index):
@@ -1576,7 +1586,7 @@ def remove_tag(index):
     if 'tags' in chats[index] and tag in chats[index]['tags']:
         chats[index]['tags'].remove(tag)
     save_chats(username, chats)
-    return jsonify({'success': True, 'chats': chats})
+    return jsonify({'success': True, 'chats': chats_for_json(chats)})
 
 @app.route('/api/summarize_chat/<int:index>', methods=['POST'])
 def summarize_chat(index):

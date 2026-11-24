@@ -15,7 +15,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import (  # noqa: E402  (path bootstrap must run first)
+import app as court  # noqa: E402  (path bootstrap must run first)
+from app import (  # noqa: E402
+    build_rag_context,
     format_ai_response,
     normalize_chats,
     sanitize_chat_history,
@@ -183,6 +185,84 @@ def test_import_pipeline_sanitizes_before_the_client_renders():
     assert_inert(cleaned[0]["messages"][0]["message"])
     # Non-string messages are dropped instead of crashing nh3 on the chat page.
     assert cleaned[0]["messages"][1]["message"] == ""
+
+
+def test_source_snippets_stay_plain_data_for_textcontent(monkeypatch):
+    hostile = "<img src=x onerror=alert(1)><script>alert(2)</script>"
+    sources = [{"id": 1, "source": "<b>doc</b>", "snippet": hostile, "score": 0.5}]
+    cleaned = sanitize_chat_history([{
+        "title": "Cited",
+        "messages": [{"type": "ai", "message": "<p>see [1]</p>", "sources": sources}],
+    }])
+
+    # Citations are rendered with textContent, so they are carried verbatim and
+    # never merged into the HTML string. The reply itself is still sanitized.
+    assert cleaned[0]["messages"][0]["sources"] == sources
+    assert cleaned[0]["messages"][0]["message"] == "<p>see [1]</p>"
+
+
+def test_build_rag_context_numbers_citations_as_plain_text(monkeypatch):
+    user_rag = {
+        "enabled": True,
+        "documents": [{
+            "name": "notes.txt",
+            "chunks": [{"text": "relevant <img src=x onerror=alert(1)> bit", "embedding": None}],
+        }],
+    }
+    monkeypatch.setattr(court, "get_user_rag", lambda username: user_rag)
+    monkeypatch.setattr(court, "get_embedding", lambda text: None)  # keep it lexical/offline
+
+    context, sources = build_rag_context("alice", "relevant")
+
+    assert context.startswith("[1] notes.txt: relevant <img src=x onerror=alert(1)> bit")
+    assert sources[0]["id"] == 1
+    assert sources[0]["source"] == "notes.txt"
+    assert sources[0]["snippet"] == "relevant <img src=x onerror=alert(1)> bit"
+
+
+def test_chat_page_escapes_source_snippets_into_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(court, "USER_DB_FILE", str(tmp_path / "users.db"))
+    monkeypatch.setattr(court, "DATA_FILE", str(tmp_path / "storage.json"))
+    court.init_user_db()
+    court.create_user("alice", "password123", "Alice")
+    court.save_chats("alice", [{
+        "title": "Cited",
+        "tags": [],
+        "messages": [{
+            "type": "ai",
+            "message": "<p>see [1]</p>",
+            "sources": [{"id": 1, "source": "doc", "snippet": "<img src=x onerror=alert(1)>", "score": 0.5}],
+        }],
+    }])
+    client = court.app.test_client()
+    with client.session_transaction() as session:
+        session["logged_in"] = True
+        session["session_version"] = 0
+        session["username"] = "alice"
+        session["current_chat_index"] = 0
+
+    page = client.get("/chat").get_data(as_text=True)
+
+    # Flask's tojson escapes markup, so the snippet cannot break out of the JSON
+    # literal; the client then treats it as a text node.
+    assert "<img src=x" not in page
+    assert "u003cimg" in page
+    assert "see [1]" in page
+
+
+def function_block(template, name):
+    start = template.index(f"function {name}")
+    end = template.find("function ", start + 1)
+    return template[start:end if end != -1 else len(template)]
+
+
+def test_sources_and_chat_list_renderers_never_use_innerhtml():
+    template = (Path(__file__).resolve().parent.parent / "templates" / "chat.html").read_text()
+
+    for name in ("attachSources", "showSourcesModal", "updateChatHistory"):
+        block = function_block(template, name)
+        assert "textContent" in block, name
+        assert "innerHTML" not in block, name
 
 
 def test_sanitize_chat_history_resanitizes_stored_ai_replies():
