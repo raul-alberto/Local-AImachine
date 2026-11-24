@@ -250,7 +250,17 @@ To create a local Windows package and installer:
 - `requirements.txt`: Python dependencies
 - `requirements-dev.txt`: adds pytest to the runtime requirements
 
-Run the tests with `pip install -r requirements-dev.txt` and then `python -m pytest`.
+## Running the Tests
+
+Install the dev requirements, then run the suite from the project root:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The tests cover the reply sanitizer and citation escaping, chat payload
+sanitizing, the Origin guard, login throttling and password reset.
 
 ## Usage
 
