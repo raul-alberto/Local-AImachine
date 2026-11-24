@@ -99,17 +99,6 @@ def main():
             ollama_proc.terminate()
             ollama_proc.wait(timeout=10)
 
-    print('Starting Court app...')
-    try:
-        app.main()
-    except Exception as e:
-        print(f'Court exited with error: {e}')
-    finally:
-        if ollama_proc:
-            print('Stopping Ollama server...')
-            ollama_proc.terminate()
-            ollama_proc.wait(timeout=10)
-
 
 if __name__ == '__main__':
     main()
