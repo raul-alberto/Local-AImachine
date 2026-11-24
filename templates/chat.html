@@ -126,7 +126,14 @@
         </button>
         <div class="topbar-title">
           <strong>Chat</strong>
-          <span class="topbar-model">{{ model_name }}</span>
+          <select
+            id="model-select"
+            class="select model-select"
+            aria-label="Model that answers your messages"
+            title="Model that answers your messages"
+          >
+            <option value="{{ model_name }}" selected>{{ model_name }}</option>
+          </select>
         </div>
         <div class="topbar-right">
           <span id="health-pill" class="pill">Checking local status…</span>
@@ -682,6 +689,7 @@
         const topKValue = document.getElementById('top-k-value');
         const stopButton = document.getElementById('stop-generate');
         const healthPill = document.getElementById('health-pill');
+        const modelSelect = document.getElementById('model-select');
       const ragEnabledInput = document.getElementById('rag-enabled');
       const ragFileInput = document.getElementById('rag-file');
       const ragUploadButton = document.getElementById('rag-upload');
@@ -839,11 +847,108 @@
               healthPill.className = 'pill pill--bad';
               healthPill.textContent = 'Ollama offline';
             }
+            if (data.ollama_available) {
+              refreshModels();
+            }
           } catch (error) {
                           healthPill.className = 'pill pill--bad';
               healthPill.textContent = 'Health check unavailable';
           }
         }
+
+        let modelsLoaded = false;
+        let useNativeModelPicker = typeof modelSelect.showPicker !== 'function';
+
+        async function refreshModels({ preserveSelection = false, force = false } = {}) {
+          if (modelsLoaded && !force) return true;
+          try {
+            const response = await fetch('/api/models');
+            if (!response.ok) return false;
+            const data = await response.json();
+            const names = [...new Set((data.models || []).map((model) => model.name))];
+            // While opening the picker, keep whatever this window already uses
+            // (including a stale saved name) instead of snapping to the server.
+            const preferred = preserveSelection && modelSelect.value
+              ? modelSelect.value
+              : (data.selected || '');
+            if (preferred && !names.includes(preferred)) {
+              names.unshift(preferred);
+            }
+            if (data.selected && !names.includes(data.selected)) {
+              names.unshift(data.selected);
+            }
+            modelSelect.replaceChildren();
+            if (!names.length) {
+              const option = document.createElement('option');
+              option.value = '';
+              option.disabled = true;
+              option.selected = true;
+              option.textContent = data.ollama_available
+                ? 'No models installed'
+                : 'Ollama offline';
+              modelSelect.appendChild(option);
+            } else {
+              names.forEach((name) => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                modelSelect.appendChild(option);
+              });
+              modelSelect.value = names.includes(preferred) ? preferred : names[0];
+            }
+            // Retry while Ollama is offline or has nothing pulled yet.
+            modelsLoaded = names.length > 0;
+            return true;
+          } catch (error) {
+            // Keep the server-rendered choice until the next health check.
+            return false;
+          }
+        }
+
+        async function openModelPicker(event) {
+          if (!useNativeModelPicker) {
+            // Refresh first, then open the picker with the new list, so a model
+            // pulled since this page loaded shows up on the first click.
+            event.preventDefault();
+            await refreshModels({ preserveSelection: true, force: true });
+            try {
+              modelSelect.showPicker();
+            } catch (error) {
+              // The gesture was lost; let the next click open the native list.
+              useNativeModelPicker = true;
+            }
+            return;
+          }
+          refreshModels({ preserveSelection: true, force: true });
+        }
+
+        modelSelect.addEventListener('mousedown', openModelPicker);
+        modelSelect.addEventListener('focus', () => {
+          refreshModels({ preserveSelection: true });
+        });
+
+        modelSelect.addEventListener('change', async () => {
+          const chosen = modelSelect.value;
+          if (!chosen) return;
+          modelSelect.disabled = true;
+          try {
+            const response = await fetch('/api/model', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model: chosen }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.success) {
+              throw new Error(data.error || 'Unable to switch models.');
+            }
+            refreshHealth();
+          } catch (error) {
+            alert(error.message);
+            await refreshModels({ force: true });
+          } finally {
+            modelSelect.disabled = false;
+          }
+        });
 
         function createStreamingBubble() {
           const chat = document.getElementById('chat');
@@ -1513,6 +1618,7 @@
       hydrateSettingsUI();
       paintRagStatus(initialRagStatus || { enabled: true, doc_count: 0, chunk_count: 0 });
       refreshRagStatus();
+      refreshModels();
       refreshHealth();
       setInterval(refreshHealth, 20000);
       updateChatHistory();

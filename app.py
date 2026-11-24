@@ -249,6 +249,15 @@ OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 OLLAMA_EMBED_URL = "http://localhost:11434/api/embeddings"
 MODEL = os.environ.get('COURT_MODEL') or os.environ.get('BETTEN_MODEL', 'godmoded/llama3-lexi-uncensored:latest')
 EMBED_MODEL = os.environ.get('COURT_EMBED_MODEL', 'nomic-embed-text:latest')
+MODEL_NAME_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$')
+
+
+def normalize_model_name(name):
+    """Return a usable Ollama model name, or '' when the value is not one."""
+    if not isinstance(name, str):
+        return ''
+    name = name.strip()
+    return name if MODEL_NAME_PATTERN.match(name) else ''
 DATA_FILE = os.path.join(app.root_path, 'storage.json')
 RAG_FILE = os.path.join(app.root_path, 'rag_store.json')
 MAX_RAG_FILE_BYTES = 2 * 1024 * 1024
@@ -711,22 +720,28 @@ def get_user_settings(username):
     if not isinstance(saved_current_chat_index, int):
         saved_current_chat_index = -1
 
+    # Empty means the account never picked one; callers fall back to MODEL.
+    model = normalize_model_name(user_data.get('model'))
+
     return {
         'system_prompt': system_prompt,
         'generation_settings': generation_settings,
         'profile': profile,
         'privacy_mode': privacy_mode,
         'saved_current_chat_index': saved_current_chat_index,
+        'model': model,
     }
 
 
-def save_user_settings(username, system_prompt, generation_settings, profile, privacy_mode=None):
+def save_user_settings(username, system_prompt, generation_settings, profile, privacy_mode=None, model=None):
     storage = load_storage()
     users = storage.setdefault('users', {})
     existing = users.get(username, {}) if isinstance(users.get(username, {}), dict) else {}
     resolved_privacy_mode = privacy_mode or existing.get('privacy_mode', DEFAULT_PRIVACY_MODE)
     if resolved_privacy_mode not in ('ephemeral', 'persistent'):
         resolved_privacy_mode = DEFAULT_PRIVACY_MODE
+    # None means "leave the stored choice alone"; '' would clear it.
+    resolved_model = normalize_model_name(model) or normalize_model_name(existing.get('model'))
 
     users[username] = {
         'system_prompt': system_prompt,
@@ -737,7 +752,33 @@ def save_user_settings(username, system_prompt, generation_settings, profile, pr
             'theme': (profile.get('theme') or DEFAULT_PROFILE['theme']).strip().lower(),
         },
         'privacy_mode': resolved_privacy_mode,
+        'model': resolved_model,
     }
+    save_storage(storage)
+
+
+def get_selected_model(username):
+    """The model this account picked, or the install default."""
+    if has_request_context():
+        chosen = normalize_model_name(session.get('model'))
+        if chosen:
+            return chosen
+    if username:
+        chosen = normalize_model_name(get_user_settings(username).get('model'))
+        if chosen:
+            return chosen
+    return MODEL
+
+
+def save_user_model(username, model_name):
+    """Remember this account's chosen model without rewriting its settings."""
+    storage = load_storage()
+    users = storage.setdefault('users', {})
+    entry = users.get(username)
+    if not isinstance(entry, dict):
+        entry = {}
+    entry['model'] = normalize_model_name(model_name)
+    users[username] = entry
     save_storage(storage)
 
 
@@ -1012,10 +1053,10 @@ def build_chat_prompt(system_prompt, history, user_message, rag_context=''):
     return '\n\n'.join(parts)
 
 
-def build_ollama_payload(prompt_payload, generation_settings, stream):
+def build_ollama_payload(prompt_payload, generation_settings, stream, model_name=None):
     settings = _apply_preset(_coerce_generation_settings(generation_settings))
     return {
-        'model': MODEL,
+        'model': normalize_model_name(model_name) or MODEL,
         'prompt': prompt_payload,
         'stream': stream,
         'options': {
@@ -1206,6 +1247,7 @@ def start_user_session(user):
     session['generation_settings'] = user_settings['generation_settings']
     session['profile'] = user_settings['profile']
     session['privacy_mode'] = user_settings.get('privacy_mode', DEFAULT_PRIVACY_MODE)
+    session['model'] = user_settings.get('model') or MODEL
     if session['privacy_mode'] == 'persistent':
         migrate_legacy_chats(user['username'])
         session['current_chat_index'] = user_settings.get('saved_current_chat_index', -1)
@@ -1369,7 +1411,7 @@ def chat():
         profile=profile,
         username=session.get('username', 'local-user'),
         display_name=session.get('display_name', 'Local User'),
-        model_name=MODEL,
+        model_name=get_selected_model(username),
         rag_status=rag_status_for_user(get_username_from_session()),
         privacy_mode=session.get('privacy_mode', DEFAULT_PRIVACY_MODE),
         initial_theme=get_preferred_theme(),
@@ -1423,7 +1465,7 @@ def api_chat():
     # tail so the model always ends on the question it is answering.
     history = format_history_for_prompt(chats[current_index]['messages'][:-1])
     prompt_payload = build_chat_prompt(system_prompt, history, user_message, rag_context)
-    payload = build_ollama_payload(prompt_payload, generation_settings, stream=False)
+    payload = build_ollama_payload(prompt_payload, generation_settings, stream=False, model_name=get_selected_model(username))
     try:
         response = requests.post(OLLAMA_URL, json=payload, timeout=120)
         response.raise_for_status()
@@ -1473,7 +1515,7 @@ def api_chat_stream():
     rag_context, rag_sources = build_rag_context(username, user_message)
     history = format_history_for_prompt(chats[current_index]['messages'][:-1])
     prompt_payload = build_chat_prompt(system_prompt, history, user_message, rag_context)
-    payload = build_ollama_payload(prompt_payload, generation_settings, stream=True)
+    payload = build_ollama_payload(prompt_payload, generation_settings, stream=True, model_name=get_selected_model(username))
 
     @stream_with_context
     def generate():
@@ -1619,14 +1661,63 @@ def api_health():
 
     available, tags_payload = is_ollama_available()
     installed_models = [m.get('name', '') for m in tags_payload.get('models', [])] if available else []
-    model_installed = MODEL in installed_models
+    selected = get_selected_model(get_username_from_session())
     return jsonify({
         'ollama_available': available,
-        'model': MODEL,
-        'model_installed': model_installed,
+        'model': selected,
+        'model_installed': selected in installed_models,
+        'models': installed_models,
         'embedding_model': EMBED_MODEL,
         'user': session.get('username', 'local-user'),
     })
+
+
+@app.route('/api/models', methods=['GET'])
+def api_models():
+    """List the models pulled on this machine, plus this account's choice."""
+    if not session.get('logged_in'):
+        return jsonify({'error': 'Unauthorized'}), 401
+    available, tags_payload = is_ollama_available()
+    models = []
+    if available:
+        for entry in tags_payload.get('models', []):
+            if not isinstance(entry, dict):
+                continue
+            name = normalize_model_name(entry.get('name'))
+            if name and all(model['name'] != name for model in models):
+                models.append({'name': name, 'size': entry.get('size')})
+    models.sort(key=lambda model: model['name'].lower())
+    return jsonify({
+        'success': True,
+        'ollama_available': available,
+        'models': models,
+        'selected': get_selected_model(get_username_from_session()),
+        'default_model': MODEL,
+    })
+
+
+@app.route('/api/model', methods=['POST'])
+def api_select_model():
+    """Switch this account to another model that Ollama already has."""
+    if not session.get('logged_in'):
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.get_json() or {}
+    name = normalize_model_name(data.get('model'))
+    if not name:
+        return jsonify({'error': 'Choose a model from the installed list.'}), 400
+    available, tags_payload = is_ollama_available()
+    if not available:
+        return jsonify({'error': 'Ollama is not running, so the model list is unavailable.'}), 503
+    installed = {
+        normalize_model_name(entry.get('name'))
+        for entry in tags_payload.get('models', [])
+        if isinstance(entry, dict)
+    }
+    if name not in installed:
+        return jsonify({'error': f'{name} is not installed. Run: ollama pull {name}'}), 400
+    session['model'] = name
+    save_user_model(get_username_from_session(), name)
+    return jsonify({'success': True, 'model': name})
 
 
 @app.route('/api/rag/status', methods=['GET'])
@@ -1886,7 +1977,7 @@ def summarize_chat(index):
     prompt_payload = f"System: {system_prompt}\n\nPlease provide a brief 1-2 sentence summary of this conversation:\n\n{messages_text}\n\nSummary:"
     
     generation_settings = _coerce_generation_settings(session.get('generation_settings', DEFAULT_GENERATION_SETTINGS))
-    payload = build_ollama_payload(prompt_payload, generation_settings, stream=False)
+    payload = build_ollama_payload(prompt_payload, generation_settings, stream=False, model_name=get_selected_model(get_username_from_session()))
     try:
         response = requests.post(OLLAMA_URL, json=payload, timeout=60)
         response.raise_for_status()

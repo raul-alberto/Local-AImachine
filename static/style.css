@@ -870,12 +870,29 @@ input[type='checkbox'] {
   font-weight: 600;
 }
 
-.topbar-model {
+.model-select {
+  width: auto;
+  max-width: 240px;
+  padding: 0.2rem 1.75rem 0.2rem 0.5rem;
   font-size: 0.75rem;
   color: var(--faint);
-  white-space: nowrap;
-  overflow: hidden;
+  background-color: transparent;
+  border-color: transparent;
+  border-radius: var(--radius-sm);
   text-overflow: ellipsis;
+}
+
+.model-select:hover,
+.model-select:focus {
+  color: var(--text);
+  border-color: var(--line);
+  background-color: rgba(0, 0, 0, 0.35);
+}
+
+@media (max-width: 620px) {
+  .model-select {
+    max-width: 130px;
+  }
 }
 
 .topbar-right {

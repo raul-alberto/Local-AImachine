@@ -141,7 +141,17 @@ Anyone who can reach an exposed instance sees the login page, and registration s
 
 ## Model Selection
 
-To run with a specific local Ollama model:
+Court lists the models you have pulled with Ollama in the picker at the top of
+the chat. Choose one and it answers your next message; the choice is saved to
+your account, so it survives a sign-out and applies in every open window. Only
+installed models can be selected, so pull a new one first:
+
+```bash
+ollama pull qwen2.5:7b
+```
+
+`COURT_MODEL` (or `BETTEN_MODEL`) only sets the default used until someone picks
+a model in the UI:
 
 ```powershell
 $env:COURT_MODEL='court-refusal-v2'
@@ -155,7 +165,7 @@ export COURT_MODEL='court-refusal-v2'
 python app.py
 ```
 
-If the UI shows model missing, confirm:
+If the header says model missing or Ollama offline, confirm:
 
 ```powershell
 ollama list
