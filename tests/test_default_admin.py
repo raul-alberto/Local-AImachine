@@ -14,13 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import app as court  # noqa: E402  (path bootstrap must run first)
 
 
-@pytest.fixture(autouse=True)
-def fresh_default_admin_cache():
-    court.uses_default_admin_password.cache_clear()
-    yield
-    court.uses_default_admin_password.cache_clear()
-
-
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     monkeypatch.setattr(court, 'USER_DB_FILE', str(tmp_path / 'users.db'))
@@ -66,34 +59,43 @@ def test_signed_out_login_page_does_not_disclose_the_default_password(db):
     assert b'published default password' not in page.data
 
 
-def test_signed_in_admin_sees_the_warning(db):
+def test_default_admin_is_sent_to_the_password_page(db):
     court.create_user('admin', 'admin123', 'Admin')
 
-    page = client('admin').get('/chat')
+    response = client('admin').get('/chat')
+
+    assert response.status_code == 302
+    assert response.headers['Location'].endswith('/account/password')
+
+
+def test_password_page_is_reachable_for_that_admin(db):
+    court.create_user('admin', 'admin123', 'Admin')
+
+    page = client('admin').get('/account/password')
 
     assert page.status_code == 200
-    assert b'published default password' in page.data
+    assert b'Change password' in page.data
 
 
-def test_warning_goes_away_after_the_password_change(db):
+def test_redirect_stops_after_the_password_change(db):
     court.create_user('admin', 'admin123', 'Admin')
     court.update_user_password('admin', 'a-much-better-password')
 
-    page = client('admin').get('/chat')
+    page = login('admin', 'a-much-better-password').get('/chat')
 
-    assert b'published default password' not in page.data
+    assert page.status_code == 200
 
 
-def test_other_users_do_not_see_the_warning(db):
+def test_other_users_are_not_redirected(db):
     court.create_user('admin', 'admin123', 'Admin')
     court.create_user('alice', 'password123', 'Alice')
 
     page = client('alice').get('/chat')
 
-    assert b'published default password' not in page.data
+    assert page.status_code == 200
 
 
-def test_default_password_check_is_cached_until_a_change(db, monkeypatch):
+def test_default_password_check_is_cached_per_stored_hash(db, monkeypatch):
     court.create_user('admin', 'admin123', 'Admin')
     real_check = court.check_password_hash
     calls = []
@@ -112,6 +114,63 @@ def test_default_password_check_is_cached_until_a_change(db, monkeypatch):
 
     assert court.uses_default_admin_password() is False
     assert len(calls) == 2
+
+
+def test_password_edited_outside_the_app_is_picked_up(db):
+    court.create_user('admin', 'admin123', 'Admin')
+    assert court.uses_default_admin_password() is True
+
+    conn = court._connect_user_db()
+    try:
+        conn.execute(
+            'UPDATE users SET password_hash = ? WHERE username = ?',
+            (court.generate_password_hash('a-much-better-password'), 'admin'),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert court.uses_default_admin_password() is False
+
+
+def test_removing_the_admin_account_clears_the_warning(db):
+    court.create_user('admin', 'admin123', 'Admin')
+    assert court.uses_default_admin_password() is True
+
+    conn = court._connect_user_db()
+    try:
+        conn.execute('DELETE FROM users WHERE username = ?', ('admin',))
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert court.uses_default_admin_password() is False
+
+
+def login(username, password):
+    test_client = court.app.test_client()
+    response = test_client.post('/', data={'username': username, 'password': password})
+    assert response.status_code == 302
+    return test_client
+
+
+def test_changing_the_default_admin_password_signs_out_other_sessions(db):
+    court.create_user('admin', 'admin123', 'Admin')
+    changing = login('admin', 'admin123')
+    stolen = login('admin', 'admin123')  # cookie captured while the default worked
+    assert stolen.get('/account/password').status_code == 200  # session is live
+
+    changed = changing.post('/account/password', data={
+        'current_password': 'admin123',
+        'new_password': 'a-much-better-password',
+        'confirm_password': 'a-much-better-password',
+    })
+
+    assert changed.status_code == 302
+    assert changing.get('/chat').status_code == 200  # the device that changed it stays
+    evicted = stolen.get('/chat')
+    assert evicted.status_code == 302
+    assert evicted.headers['Location'].endswith('/')
 
 
 def test_password_page_requires_sign_in(db):

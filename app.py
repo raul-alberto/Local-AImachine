@@ -499,7 +499,6 @@ def create_user(username, password, display_name):
         conn.commit()
     finally:
         conn.close()
-    uses_default_admin_password.cache_clear()
 
 
 def update_user_password(username, password):
@@ -516,7 +515,6 @@ def update_user_password(username, password):
         version = row[0] if row else None
     finally:
         conn.close()
-    uses_default_admin_password.cache_clear()
     return version
 
 
@@ -526,14 +524,20 @@ DEFAULT_ADMIN_PASSWORD = 'admin123'
 
 
 @cache
-def uses_default_admin_password():
-    """True while an upgraded install still accepts the published admin login.
+def _matches_default_password(password_hash):
+    """Remember whether a stored hash accepts the published password.
 
-    Each answer costs a scrypt verification, so it is cached for the process and
-    cleared whenever an account password changes.
+    Verification is scrypt-expensive. Keying the cache on the hash makes the
+    answer correct after a password change, an account recreation or a row
+    edited outside the app, without invalidation to keep in sync.
     """
+    return check_password_hash(password_hash, DEFAULT_ADMIN_PASSWORD)
+
+
+def uses_default_admin_password():
+    """True while an upgraded install still accepts the published admin login."""
     user = get_user_by_username(DEFAULT_ADMIN_USERNAME)
-    return bool(user and check_password_hash(user['password_hash'], DEFAULT_ADMIN_PASSWORD))
+    return bool(user) and _matches_default_password(user['password_hash'])
 
 
 def load_storage():
@@ -1053,6 +1057,9 @@ def chat():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     username = get_username_from_session()
+    if username == DEFAULT_ADMIN_USERNAME and uses_default_admin_password():
+        # The published login is not a usable account state; change it first.
+        return redirect(url_for('change_password'))
     chats = load_chats(username)
     current_chat_index = session.get('current_chat_index', -1)
     if not chats:
@@ -1085,9 +1092,6 @@ def chat():
         rag_status=rag_status_for_user(get_username_from_session()),
         privacy_mode=session.get('privacy_mode', DEFAULT_PRIVACY_MODE),
         initial_theme=get_preferred_theme(),
-        default_admin_password=(
-            session.get('username') == DEFAULT_ADMIN_USERNAME and uses_default_admin_password()
-        ),
     ))
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
