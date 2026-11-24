@@ -829,8 +829,20 @@ def login_lock_seconds(key):
     return max(0, math.ceil(entry['locked_until'] - time.time())) if entry else 0
 
 
+def prune_login_failures(now):
+    """Forget keys whose counting window has passed, keeping live locks.
+
+    Without this the table keeps one entry per address and username forever on
+    a long-running exposed instance.
+    """
+    for stale_key, entry in list(_login_failures.items()):
+        if entry['locked_until'] <= now and now - entry['first'] > LOGIN_WINDOW_SECONDS:
+            del _login_failures[stale_key]
+
+
 def record_login_failure(key):
     now = time.time()
+    prune_login_failures(now)
     entry = _login_failures.get(key)
     if not entry or now - entry['first'] > LOGIN_WINDOW_SECONDS:
         entry = {'count': 0, 'first': now, 'locked_until': 0}

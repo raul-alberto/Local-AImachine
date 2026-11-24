@@ -97,6 +97,25 @@ def test_lock_expires_after_the_window(db):
     assert unlocked.headers['Location'].endswith('/chat')
 
 
+def test_stale_throttle_entries_are_pruned_but_live_locks_survive(db):
+    now = court.time.time()
+    window = court.LOGIN_WINDOW_SECONDS
+    court._login_failures.update({
+        'old:alice': {'count': 2, 'first': now - window - 1, 'locked_until': 0},
+        'recent:bob': {'count': 1, 'first': now, 'locked_until': 0},
+        'locked:carol': {'count': 5, 'first': now - window - 1, 'locked_until': now + 60},
+    })
+
+    court.record_login_failure('new:dave')
+
+    assert 'old:alice' not in court._login_failures
+    assert 'recent:bob' in court._login_failures
+    # A lock that outlasted its counting window must still be enforced.
+    assert 'locked:carol' in court._login_failures
+    assert court.login_lock_seconds('locked:carol') > 0
+    assert court._login_failures['new:dave']['count'] == 1
+
+
 def test_successful_login_clears_the_failure_counter(db):
     make_user()
     client = court.app.test_client()
