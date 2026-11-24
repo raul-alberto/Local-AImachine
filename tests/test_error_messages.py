@@ -5,24 +5,13 @@ messages would make the same text go through the Markdown/HTML branch on
 reload. They are stored with type 'error', which the page renders as text.
 """
 
+import re
 import sys
 from pathlib import Path
-
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import app as court  # noqa: E402  (path bootstrap must run first)
-
-
-@pytest.fixture
-def db(tmp_path, monkeypatch):
-    monkeypatch.setattr(court, 'USER_DB_FILE', str(tmp_path / 'users.db'))
-    monkeypatch.setattr(court, 'DATA_FILE', str(tmp_path / 'storage.json'))
-    monkeypatch.setattr(court, 'RAG_FILE', str(tmp_path / 'rag_store.json'))
-    court.init_user_db()
-    court.create_user('alice', 'password123', 'Alice')
-    return 'alice'
 
 
 def signed_in():
@@ -62,8 +51,11 @@ def test_stream_failure_is_stored_as_an_error(db, monkeypatch):
 
     response = signed_in().post('/api/chat_stream', json={'message': 'hello'})
 
-    packets = [court.json.loads(line) for line in response.get_data(as_text=True).splitlines() if line]
-    assert [packet['type'] for packet in packets if packet['type'] == 'error'] == ['error']
+    body = response.get_data(as_text=True)
+    packets = [court.json.loads(line) for line in body.splitlines() if line]
+    errors = [packet for packet in packets if packet['type'] == 'error']
+    assert len(errors) == 1
+    assert errors[0]['message'].startswith('Error: AI request failed')
     stored = last_message()
     assert stored['type'] == 'error'
     assert stored['message'].startswith('Error: AI request failed')
@@ -88,6 +80,13 @@ def test_stored_error_text_is_not_treated_as_markdown(db):
 def test_chat_js_only_opts_ai_messages_into_html():
     template = (Path(__file__).resolve().parent.parent / 'templates' / 'chat.html').read_text()
 
-    assert "appendMessage(msg.message, msg.type, msg.sources || [], msg.type === 'ai')" in template
+    # Plain text is the default, history opts AI rows into HTML, and every
+    # non-user row (including stored errors) gets the AI-styled text bubble.
+    assert 'appendMessage(text, type, sources = [], asHtml = false)' in template
+    assert re.search(
+        r"appendMessage\(msg\.message, msg\.type, msg\.sources \|\| \[\], "
+        r"msg\.type === 'ai'\)",
+        template,
+    )
     assert "const fromAi = type !== 'user';" in template
     assert "appendMessage(packet.message || 'Error: Unable to get response', 'ai');" in template

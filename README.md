@@ -248,6 +248,9 @@ To create a local Windows package and installer:
 - `templates/`: HTML templates (login, register, chat, faqs)
 - `static/`: shared stylesheet, images, and the vendored highlight.js build and theme (`vendor/`, BSD-3-Clause) used for offline code highlighting
 - `requirements.txt`: Python dependencies
+- `requirements-dev.txt`: adds pytest to the runtime requirements
+
+Run the tests with `pip install -r requirements-dev.txt` and then `python -m pytest`.
 
 ## Usage
 

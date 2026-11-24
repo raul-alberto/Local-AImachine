@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import app as court  # noqa: E402  (path bootstrap must run first)
 from app import (  # noqa: E402
+    ALLOWED_REPLY_TAGS,
     build_rag_context,
     format_ai_response,
     normalize_chats,
@@ -24,12 +25,6 @@ from app import (  # noqa: E402
     sanitize_reply_html,
 )
 
-# Mirrors ALLOWED_REPLY_TAGS in app.py.
-ALLOWED_TAGS = {
-    "a", "blockquote", "br", "code", "em", "h1", "h2", "h3", "h4", "h5",
-    "h6", "hr", "li", "ol", "p", "pre", "strong", "table", "tbody", "td",
-    "th", "thead", "tr", "ul",
-}
 DANGEROUS_SCHEMES = ("javascript:", "data:", "vbscript:")
 
 
@@ -42,10 +37,8 @@ class _MarkupInspector(HTMLParser):
         self.attributes = []
 
     def handle_starttag(self, tag, attrs):
-        self.tags.append(tag)
-        self.attributes.extend(attrs)
-
-    def handle_startendtag(self, tag, attrs):
+        # HTMLParser's default handle_startendtag delegates here, so void and
+        # self-closing tags are captured without a second override.
         self.tags.append(tag)
         self.attributes.extend(attrs)
 
@@ -60,13 +53,44 @@ def inspect(html):
 def assert_inert(html):
     """Fail if the markup can run script: unknown tags, on* handlers, bad URLs."""
     parser = inspect(html)
-    assert set(parser.tags) <= ALLOWED_TAGS, f"unexpected tags: {parser.tags!r}"
+    assert set(parser.tags) <= ALLOWED_REPLY_TAGS, f"unexpected tags: {parser.tags!r}"
     for name, value in parser.attributes:
         assert not name.lower().startswith("on"), f"event handler kept: {name}"
         if value:
-            assert not value.strip().lower().startswith(DANGEROUS_SCHEMES), (
+            # Browsers drop ASCII controls and spaces inside a URL scheme, so
+            # "java\tscript:" must be judged as javascript: too.
+            compact = "".join(ch for ch in value if ord(ch) > 32 and ord(ch) != 127).lower()
+            assert not compact.startswith(DANGEROUS_SCHEMES), (
                 f"dangerous URL kept: {name}={value!r}"
             )
+
+
+def test_reply_allowlist_keeps_executable_elements_out():
+    # assert_inert trusts the allowlist, so pin the part that makes it safe.
+    executable = {
+        "script", "iframe", "img", "svg", "object", "embed", "style", "form",
+        "input", "base", "link", "meta", "template",
+    }
+    assert ALLOWED_REPLY_TAGS.isdisjoint(executable)
+
+
+@pytest.mark.parametrize(
+    "dangerous",
+    [
+        "<script>x</script>",
+        '<img src=x onerror="alert(1)">',
+        '<a href="java\tscript:alert(1)">x</a>',
+    ],
+)
+def test_assert_inert_rejects_executable_markup(dangerous):
+    # Guards the oracle itself: a helper that silently collected nothing would
+    # make every payload test above pass.
+    with pytest.raises(AssertionError):
+        assert_inert(dangerous)
+
+
+def test_assert_inert_accepts_plain_formatting():
+    assert_inert("<p><strong>ok</strong> <a href='https://example.test'>link</a></p>")
 
 
 @pytest.mark.parametrize(
@@ -86,14 +110,9 @@ def assert_inert(html):
     ],
 )
 def test_sanitize_reply_html_strips_executable_markup(payload):
-    out = sanitize_reply_html(payload)
-    assert_inert(out)
-    # Payloads lived in script bodies, event handlers or URL attributes; all gone.
-    assert "alert(" not in out
-    assert "<" + "script" not in out.lower()
-    assert "<" + "iframe" not in out.lower()
-    assert "<" + "img" not in out.lower()
-    assert "<" + "svg" not in out.lower()
+    # The parser check is the assertion: no tag, handler or URL survives that a
+    # browser could act on. Script/style bodies are covered separately below.
+    assert_inert(sanitize_reply_html(payload))
 
 
 def test_sanitize_reply_html_drops_script_bodies_and_iframe_attributes():
@@ -220,11 +239,7 @@ def test_build_rag_context_numbers_citations_as_plain_text(monkeypatch):
     assert sources[0]["snippet"] == "relevant <img src=x onerror=alert(1)> bit"
 
 
-def test_chat_page_escapes_source_snippets_into_json(tmp_path, monkeypatch):
-    monkeypatch.setattr(court, "USER_DB_FILE", str(tmp_path / "users.db"))
-    monkeypatch.setattr(court, "DATA_FILE", str(tmp_path / "storage.json"))
-    court.init_user_db()
-    court.create_user("alice", "password123", "Alice")
+def test_chat_page_escapes_source_snippets_into_json(db):
     court.save_chats("alice", [{
         "title": "Cited",
         "tags": [],
