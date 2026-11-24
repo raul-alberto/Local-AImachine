@@ -34,6 +34,7 @@ def client(username=None):
     if username:
         with test_client.session_transaction() as session:
             session['logged_in'] = True
+            session['session_version'] = 0
             session['username'] = username
     return test_client
 

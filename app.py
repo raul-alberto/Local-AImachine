@@ -118,6 +118,20 @@ def reject_cross_origin_writes():
     if request.method not in SAFE_METHODS and is_cross_origin_request():
         return jsonify({'error': 'Cross-origin request rejected'}), 403
 
+
+@app.before_request
+def enforce_session_version():
+    """Reject cookies signed before the account's password last changed."""
+    if request.endpoint == 'static' or not session.get('logged_in'):
+        return None
+    user = get_user_by_username(session.get('username') or '')
+    if user and session.get('session_version') == user['session_version']:
+        return None
+    session.clear()
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Session expired'}), 401
+    return redirect(url_for('login'))
+
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 OLLAMA_EMBED_URL = "http://localhost:11434/api/embeddings"
@@ -419,10 +433,18 @@ def init_user_db():
             )
             '''
         )
+        _ensure_user_columns(conn)
         _ensure_chat_table(conn)
         conn.commit()
     finally:
         conn.close()
+
+
+def _ensure_user_columns(conn):
+    """Add columns introduced after the first release to an existing database."""
+    columns = {row[1] for row in conn.execute('PRAGMA table_info(users)')}
+    if 'session_version' not in columns:
+        conn.execute('ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0')
 
 
 def has_any_user():
@@ -458,16 +480,21 @@ def create_user(username, password, display_name):
 
 
 def update_user_password(username, password):
+    """Replace the password and sign out every other session for the account."""
     conn = sqlite3.connect(USER_DB_FILE)
     try:
         conn.execute(
-            'UPDATE users SET password_hash = ? WHERE username = ?',
+            'UPDATE users SET password_hash = ?, session_version = session_version + 1 '
+            'WHERE username = ?',
             (generate_password_hash(password), username),
         )
         conn.commit()
+        row = conn.execute('SELECT session_version FROM users WHERE username = ?', (username,)).fetchone()
+        version = row[0] if row else None
     finally:
         conn.close()
     uses_default_admin_password.cache_clear()
+    return version
 
 
 # Credentials older installs were seeded with and are published in the docs.
@@ -887,6 +914,7 @@ def start_user_session(user):
     session.clear()
     session.permanent = True
     session['logged_in'] = True
+    session['session_version'] = user['session_version']
     session['user_id'] = user['id']
     session['username'] = user['username']
     session['display_name'] = user['display_name']
@@ -976,7 +1004,8 @@ def change_password():
         elif new_password != confirm_password:
             flash('New passwords do not match.')
         else:
-            update_user_password(username, new_password)
+            # Bumped by the update, so keep this session and evict the rest.
+            session['session_version'] = update_user_password(username, new_password)
             flash('Password updated.')
             return redirect(url_for('chat'))
     return render_template('password.html', initial_theme=get_preferred_theme(), username=username)

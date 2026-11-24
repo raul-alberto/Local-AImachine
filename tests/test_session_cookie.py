@@ -20,10 +20,16 @@ def test_configures_strict_cookie_defaults():
     assert court.app.config['PERMANENT_SESSION_LIFETIME'] == timedelta(days=7)
 
 
-def test_issued_session_cookie_carries_the_flags():
+def test_issued_session_cookie_carries_the_flags(tmp_path, monkeypatch):
+    monkeypatch.setattr(court, 'USER_DB_FILE', str(tmp_path / 'users.db'))
+    monkeypatch.setattr(court, 'DATA_FILE', str(tmp_path / 'storage.json'))
+    court.init_user_db()
+    court.create_user('cookie-test', 'password123', 'Cookie Test')
+
     client = court.app.test_client()
     with client.session_transaction() as session:
         session['logged_in'] = True
+        session['session_version'] = 0
         session['username'] = 'cookie-test'
         session.permanent = True
 

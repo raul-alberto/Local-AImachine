@@ -120,6 +120,7 @@ def test_chat_routes_keep_their_response_shape(db):
     client = court.app.test_client()
     with client.session_transaction() as session:
         session['logged_in'] = True
+        session['session_version'] = 0
         session['username'] = db
 
     created = client.post('/api/new_chat')
@@ -144,6 +145,7 @@ def test_session_cookie_carries_no_chat_content(db):
     client = court.app.test_client()
     with client.session_transaction() as session:
         session['logged_in'] = True
+        session['session_version'] = 0
         session['username'] = db
         session.permanent = True
 

@@ -47,6 +47,7 @@ def signed_in_client(username):
     client = court.app.test_client()
     with client.session_transaction() as session:
         session['logged_in'] = True
+        session['session_version'] = 0
         session['username'] = username
         session['current_chat_index'] = 0
     return client
