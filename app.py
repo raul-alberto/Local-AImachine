@@ -95,28 +95,26 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=SESSION_LIFETIME,
 )
 
-SAFE_METHODS = {'GET', 'HEAD', 'OPTIONS'}
-
-
-def is_cross_origin_request():
-    """True when a browser reports the write came from another site.
-
-    A missing Origin means the caller is not a browser acting for another site
-    (curl, scripts and tests omit it), so those keep working; a browser cannot
-    omit Origin on a cross-site POST, which is what makes this a useful check.
-    """
-    origin = request.headers.get('Origin')
-    if not origin:
-        return False
-    parsed = urlsplit(origin)
-    expected = urlsplit(request.host_url)
-    return (parsed.scheme, parsed.netloc) != (expected.scheme, expected.netloc)
-
-
 @app.before_request
 def reject_cross_origin_writes():
-    if request.method not in SAFE_METHODS and is_cross_origin_request():
+    """Reject browser writes that come from another site.
+
+    A missing Origin means a non-browser caller (curl, scripts, tests), which a
+    web page cannot imitate, so those keep working. Like any Origin check this
+    compares against the Host the request arrived with, so a page that rebinds
+    its own hostname to loopback presents its own host in both headers and is
+    not caught here; blocking that case needs a host allowlist.
+    """
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return None
+    origin = request.headers.get('Origin')
+    if not origin:
+        return None
+    parsed = urlsplit(origin)
+    expected = urlsplit(request.host_url)
+    if (parsed.scheme, parsed.netloc) != (expected.scheme, expected.netloc):
         return jsonify({'error': 'Cross-origin request rejected'}), 403
+    return None
 
 
 @app.before_request
@@ -660,10 +658,10 @@ def _chat_from_row(row):
 
 
 def save_chats(username, chats):
-    """Replace this user's stored chats in SQLite.
+    """Store this user's chats, writing only the rows that changed.
 
-    Chats live server-side rather than in the session cookie, which overflowed
-    well under a long conversation and resent every message on every request.
+    Rewriting the whole table on every turn made one chat's size part of the
+    cost of sending a message in another, so unchanged rows are left alone.
     """
     user_id = _user_id_for_username(username)
     if user_id is None:
@@ -672,19 +670,29 @@ def save_chats(username, chats):
     conn = _connect_chat_db()
     try:
         with conn:
-            conn.execute('DELETE FROM chats WHERE user_id = ?', (user_id,))
+            stored = {
+                row['position']: (row['title'], row['messages'], row['tags'])
+                for row in conn.execute(
+                    'SELECT position, title, messages, tags FROM chats WHERE user_id = ?',
+                    (user_id,),
+                )
+            }
+            for position, chat in enumerate(normalized):
+                row = (
+                    chat['title'],
+                    json.dumps(chat['messages'], ensure_ascii=False),
+                    json.dumps(chat['tags'], ensure_ascii=False),
+                )
+                if stored.get(position) == row:
+                    continue
+                conn.execute(
+                    'INSERT OR REPLACE INTO chats (user_id, position, title, messages, tags) '
+                    'VALUES (?, ?, ?, ?, ?)',
+                    (user_id, position, *row),
+                )
             conn.executemany(
-                'INSERT INTO chats (user_id, position, title, messages, tags) VALUES (?, ?, ?, ?, ?)',
-                [
-                    (
-                        user_id,
-                        position,
-                        chat['title'],
-                        json.dumps(chat['messages'], ensure_ascii=False),
-                        json.dumps(chat['tags'], ensure_ascii=False),
-                    )
-                    for position, chat in enumerate(normalized)
-                ],
+                'DELETE FROM chats WHERE user_id = ? AND position = ?',
+                [(user_id, position) for position in stored if position >= len(normalized)],
             )
     finally:
         conn.close()
@@ -884,14 +892,19 @@ def login_lock_seconds(key):
     return max(0, math.ceil(entry['locked_until'] - time.time())) if entry else 0
 
 
+def _login_window_passed(entry, now):
+    return now - entry['first'] > LOGIN_WINDOW_SECONDS
+
+
 def prune_login_failures(now):
-    """Forget keys whose counting window has passed, keeping live locks.
+    """Forget keys whose window passed, unless their lock is still running.
 
     Without this the table keeps one entry per address and username forever on
-    a long-running exposed instance.
+    a long-running exposed instance. A lock set late in the window can outlive
+    it, so an active lock keeps its entry.
     """
     for stale_key, entry in list(_login_failures.items()):
-        if entry['locked_until'] <= now and now - entry['first'] > LOGIN_WINDOW_SECONDS:
+        if _login_window_passed(entry, now) and entry['locked_until'] <= now:
             del _login_failures[stale_key]
 
 
@@ -899,7 +912,7 @@ def record_login_failure(key):
     now = time.time()
     prune_login_failures(now)
     entry = _login_failures.get(key)
-    if not entry or now - entry['first'] > LOGIN_WINDOW_SECONDS:
+    if not entry or _login_window_passed(entry, now):
         entry = {'count': 0, 'first': now, 'locked_until': 0}
     entry['count'] += 1
     if entry['count'] >= LOGIN_MAX_ATTEMPTS:
@@ -1019,7 +1032,7 @@ def chat():
     chats = load_chats(username)
     current_chat_index = session.get('current_chat_index', -1)
     if not chats:
-        chats.append({'title': 'New Chat', 'messages': []})
+        chats.append({'title': 'New Chat', 'messages': [], 'tags': []})
         current_chat_index = 0
         save_chats(username, chats)
     elif current_chat_index < 0 or current_chat_index >= len(chats):
@@ -1029,9 +1042,15 @@ def chat():
     generation_settings = _coerce_generation_settings(session.get('generation_settings', DEFAULT_GENERATION_SETTINGS))
     profile = dict(DEFAULT_PROFILE)
     profile.update(session.get('profile', {}))
+    current_chat = sanitize_chat_history([chats[current_chat_index]])[0]
+    chat_summaries = [
+        {'title': chat['title'], 'tags': chat['tags'], 'message_count': len(chat['messages'])}
+        for chat in chats
+    ]
     response = make_response(render_template(
         'chat.html',
-        chats=sanitize_chat_history(chats),
+        chats=chat_summaries,
+        current_chat=current_chat,
         current_chat_index=current_chat_index,
         system_prompt=system_prompt,
         generation_settings=generation_settings,
@@ -1083,7 +1102,7 @@ def api_chat():
 
     if current_index == -1 or current_index >= len(chats):
         # Create new chat with default user name placeholder
-        chats.append({'title': 'New Chat', 'messages': []})
+        chats.append({'title': 'New Chat', 'messages': [], 'tags': []})
         current_index = len(chats) - 1
     session['current_chat_index'] = current_index
 
@@ -1129,7 +1148,7 @@ def api_chat_stream():
     chats = load_chats(username)
     current_index = session.get('current_chat_index', -1)
     if current_index == -1 or current_index >= len(chats):
-        chats.append({'title': 'New Chat', 'messages': []})
+        chats.append({'title': 'New Chat', 'messages': [], 'tags': []})
         current_index = len(chats) - 1
     session['current_chat_index'] = current_index
 
@@ -1189,6 +1208,26 @@ def new_chat():
     session['current_chat_index'] = current_index
     return jsonify({'success': True, 'chats': chats, 'current_index': current_index})
 
+@app.route('/api/chats', methods=['GET'])
+def api_chats():
+    """List the user's chats as summaries, or in full for an export."""
+    if not session.get('logged_in'):
+        return jsonify({'error': 'Unauthorized'}), 401
+    chats = load_chats(get_username_from_session())
+    if request.args.get('full') in ('1', 'true'):
+        chats = sanitize_chat_history(chats)
+    else:
+        chats = [
+            {'title': chat['title'], 'tags': chat['tags'], 'message_count': len(chat['messages'])}
+            for chat in chats
+        ]
+    return jsonify({
+        'success': True,
+        'chats': chats,
+        'current_index': session.get('current_chat_index', -1),
+    })
+
+
 @app.route('/api/load_chat/<int:index>', methods=['POST'])
 def load_chat(index):
     if not session.get('logged_in'):
@@ -1197,7 +1236,11 @@ def load_chat(index):
     if index < 0 or index >= len(chats):
         return jsonify({'error': 'Invalid chat index'}), 400
     session['current_chat_index'] = index
-    return jsonify({'success': True})
+    return jsonify({
+        'success': True,
+        'chat': sanitize_chat_history([chats[index]])[0],
+        'current_index': index,
+    })
 
 @app.route('/api/save_settings', methods=['POST'])
 def save_settings():
