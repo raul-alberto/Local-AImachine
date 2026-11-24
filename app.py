@@ -12,6 +12,7 @@ import markdown
 import nh3
 from datetime import datetime, timedelta
 from html import unescape
+from urllib.parse import urlsplit
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -93,6 +94,28 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=SESSION_LIFETIME,
 )
 
+SAFE_METHODS = {'GET', 'HEAD', 'OPTIONS'}
+
+
+def is_cross_origin_request():
+    """True when a browser reports the write came from another site.
+
+    A missing Origin means the caller is not a browser acting for another site
+    (curl, scripts and tests omit it), so those keep working; a browser cannot
+    omit Origin on a cross-site POST, which is what makes this a useful check.
+    """
+    origin = request.headers.get('Origin')
+    if not origin:
+        return False
+    parsed = urlsplit(origin)
+    expected = urlsplit(request.host_url)
+    return (parsed.scheme, parsed.netloc) != (expected.scheme, expected.netloc)
+
+
+@app.before_request
+def reject_cross_origin_writes():
+    if request.method not in SAFE_METHODS and is_cross_origin_request():
+        return jsonify({'error': 'Cross-origin request rejected'}), 403
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
