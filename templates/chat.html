@@ -480,6 +480,11 @@
       window.hljs = window.hljs || { highlightAll: () => {} };
       let currentChatIndex = {{ current_chat_index }};
       let chats = {{ chats|tojson }};
+      // Only the open chat arrives with messages; the rest load on demand.
+      const currentChat = {{ current_chat|tojson }};
+      if (currentChat && chats[currentChatIndex]) {
+          chats[currentChatIndex].messages = currentChat.messages;
+      }
       const generationSettings = {{ generation_settings|tojson }};
       const profileSettings = {{ profile|tojson }};
       const initialRagStatus = {{ rag_status|tojson }};
@@ -610,10 +615,22 @@
 
       async function loadChat(index) {
           currentChatIndex = index;
-          await fetch(`/api/load_chat/${index}`, { method: 'POST' });
+          const response = await fetch(`/api/load_chat/${index}`, { method: 'POST' });
+          const data = await response.json();
+          if (data.chat && chats[index]) {
+              chats[index].messages = data.chat.messages;
+          }
           setSidebarOpen(false);
           updateChatHistory();
           renderChat();
+      }
+
+      async function ensureChatMessages(index) {
+          const chat = chats[index];
+          if (!chat || Array.isArray(chat.messages)) return;
+          const response = await fetch(`/api/load_chat/${index}`, { method: 'POST' });
+          const data = await response.json();
+          chat.messages = data.chat ? data.chat.messages : [];
       }
 
       function syncWelcome() {
@@ -633,10 +650,11 @@
           backdrop.classList.toggle('is-open', open);
       }
 
-      function renderChat() {
+      async function renderChat() {
           const chatDiv = document.getElementById('chat');
           chatDiv.replaceChildren();
           if (currentChatIndex >= 0 && currentChatIndex < chats.length) {
+              await ensureChatMessages(currentChatIndex);
               const chat = chats[currentChatIndex];
               chat.messages.forEach(msg => {
                   appendMessage(msg.message, msg.type, msg.sources || []);
@@ -983,11 +1001,12 @@
           }
       });
 
-      exportChatButton.addEventListener('click', () => {
+      exportChatButton.addEventListener('click', async () => {
           if (currentChatIndex < 0 || currentChatIndex >= chats.length) {
               alert('Select a chat first.');
               return;
           }
+          await ensureChatMessages(currentChatIndex);
           const chat = chats[currentChatIndex];
           const exportPayload = {
               exported_at: new Date().toISOString(),
@@ -997,11 +1016,13 @@
           downloadJSON(exportPayload, `${chat.title || 'chat'}.json`);
       });
 
-      exportAllButton.addEventListener('click', () => {
+      exportAllButton.addEventListener('click', async () => {
+          const response = await fetch('/api/chats?full=1');
+          const data = await response.json();
           const exportPayload = {
               exported_at: new Date().toISOString(),
               system_prompt: systemPromptInput.value.trim(),
-              chats: chats,
+              chats: data.chats || [],
           };
             downloadJSON(exportPayload, 'court_chats.json');
       });
