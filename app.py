@@ -921,6 +921,7 @@ def is_ollama_available():
         return False, {}
 
 LOGIN_MAX_ATTEMPTS = 5
+LOGIN_ADDRESS_MAX_ATTEMPTS = 20
 LOGIN_WINDOW_SECONDS = 900
 _login_failures = {}
 
@@ -946,16 +947,21 @@ def prune_login_failures(now):
             del _login_failures[stale_key]
 
 
-def record_login_failure(key):
+def record_login_failure(key, limit=LOGIN_MAX_ATTEMPTS):
+    """Count a miss against a key, locking it once the limit is reached.
+
+    The same table holds per-account keys and one aggregate key per address, so
+    an attacker cycling usernames still has to pay for every guess.
+    """
     now = time.time()
     prune_login_failures(now)
     entry = _login_failures.get(key)
     if not entry or _login_window_passed(entry, now):
         entry = {'count': 0, 'first': now, 'locked_until': 0}
     entry['count'] += 1
-    if entry['count'] >= LOGIN_MAX_ATTEMPTS:
-        # 60s on the fifth miss, doubling for each further miss (max 15 min).
-        lock = 60 * 2 ** (entry['count'] - LOGIN_MAX_ATTEMPTS)
+    if entry['count'] >= limit:
+        # 60s at the limit, doubling for each further miss (max 15 min).
+        lock = 60 * 2 ** (entry['count'] - limit)
         entry['locked_until'] = now + min(lock, LOGIN_WINDOW_SECONDS)
     _login_failures[key] = entry
 
@@ -995,8 +1001,10 @@ def login():
     if request.method == 'POST':
         username = (request.form.get('username') or '').strip()
         password = request.form.get('password') or ''
-        attempt_key = f'{request.remote_addr or "local"}:{username.lower()}'
-        lock_seconds = login_lock_seconds(attempt_key)
+        address = request.remote_addr or 'local'
+        attempt_key = f'account:{address}:{username.lower()}'
+        address_key = f'address:{address}'
+        lock_seconds = max(login_lock_seconds(attempt_key), login_lock_seconds(address_key))
         if lock_seconds:
             flash(f'Too many failed attempts. Try again in {lock_seconds} seconds.')
             status = 429
@@ -1006,6 +1014,7 @@ def login():
                 _login_failures.pop(attempt_key, None)
                 return start_user_session(user)
             record_login_failure(attempt_key)
+            record_login_failure(address_key, LOGIN_ADDRESS_MAX_ATTEMPTS)
             flash('Invalid credentials')
     return render_template('login.html', initial_theme=get_preferred_theme()), status
 

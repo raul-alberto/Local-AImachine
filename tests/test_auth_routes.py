@@ -51,6 +51,26 @@ def test_empty_install_redirects_to_registration(db):
     assert submitted.headers['Location'].endswith('/register')
 
 
+def test_first_registration_unblocks_the_login_page(db):
+    client = court.app.test_client()
+    assert client.get('/').status_code == 302  # no accounts yet: go register
+
+    created = client.post('/register', data={
+        'username': 'alice',
+        'display_name': 'Alice',
+        'password': 'correct-horse',
+        'confirm_password': 'correct-horse',
+    })
+
+    assert created.status_code == 302
+    assert created.headers['Location'].endswith('/')
+    assert client.get('/').status_code == 200  # login form, not another redirect
+
+    signed_in = login(client, 'correct-horse')
+    assert signed_in.status_code == 302
+    assert signed_in.headers['Location'].endswith('/chat')
+
+
 def test_five_failures_lock_the_next_attempt(db):
     make_user()
     client = court.app.test_client()
@@ -116,7 +136,7 @@ def test_stale_throttle_entries_are_pruned_but_live_locks_survive(db):
     assert court._login_failures['new:dave']['count'] == 1
 
 
-def test_successful_login_clears_the_failure_counter(db):
+def test_successful_login_clears_only_the_account_counter(db):
     make_user()
     client = court.app.test_client()
 
@@ -127,4 +147,61 @@ def test_successful_login_clears_the_failure_counter(db):
     response = login(client, 'correct-horse')
 
     assert response.status_code == 302
-    assert court._login_failures == {}
+    assert not any(key.startswith('account:') for key in court._login_failures)
+    # The address tally survives, so one valid login cannot flush a spray.
+    address_entry = next(
+        entry for key, entry in court._login_failures.items() if key.startswith('address:')
+    )
+    assert address_entry['count'] == 3
+
+
+def test_cycling_usernames_hits_the_address_limit(db):
+    make_user()
+    client = court.app.test_client()
+
+    for index in range(court.LOGIN_ADDRESS_MAX_ATTEMPTS):
+        response = login(client, 'wrong-password', username=f'user{index}')
+        assert response.status_code == 200
+
+    blocked = login(client, 'correct-horse')
+
+    assert blocked.status_code == 429
+    assert b'Too many failed attempts' in blocked.data
+    # No single account got close to its own limit; the address tally did it.
+    account_counts = [
+        entry['count'] for key, entry in court._login_failures.items()
+        if key.startswith('account:')
+    ]
+    assert max(account_counts) == 1
+
+
+def test_address_limit_is_per_address(db):
+    make_user()
+    noisy = court.app.test_client()
+    noisy.environ_base['REMOTE_ADDR'] = '10.1.2.3'
+    other = court.app.test_client()
+    other.environ_base['REMOTE_ADDR'] = '10.9.9.9'
+
+    for index in range(court.LOGIN_ADDRESS_MAX_ATTEMPTS):
+        login(noisy, 'wrong-password', username=f'user{index}')
+    assert login(noisy, 'correct-horse').status_code == 429
+
+    allowed = login(other, 'correct-horse')
+    assert allowed.status_code == 302
+    assert allowed.headers['Location'].endswith('/chat')
+
+
+def test_address_lock_expires(db):
+    make_user()
+    client = court.app.test_client()
+
+    for index in range(court.LOGIN_ADDRESS_MAX_ATTEMPTS):
+        login(client, 'wrong-password', username=f'user{index}')
+    assert login(client, 'correct-horse').status_code == 429
+
+    for key, entry in court._login_failures.items():
+        if key.startswith('address:'):
+            entry['locked_until'] = court.time.time() - 1
+
+    allowed = login(client, 'correct-horse')
+    assert allowed.status_code == 302
