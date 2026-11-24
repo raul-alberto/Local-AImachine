@@ -432,6 +432,32 @@ def create_user(username, password, display_name):
         conn.close()
 
 
+def update_user_password(username, password):
+    conn = sqlite3.connect(USER_DB_FILE)
+    try:
+        conn.execute(
+            'UPDATE users SET password_hash = ? WHERE username = ?',
+            (generate_password_hash(password), username),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# Credentials older installs were seeded with and are published in the docs.
+DEFAULT_ADMIN_USERNAME = 'admin'
+DEFAULT_ADMIN_PASSWORD = 'admin123'
+
+
+def uses_default_admin_password():
+    """True while an upgraded install still accepts the published admin login."""
+    try:
+        user = get_user_by_username(DEFAULT_ADMIN_USERNAME)
+    except sqlite3.Error:
+        return False
+    return bool(user and check_password_hash(user['password_hash'], DEFAULT_ADMIN_PASSWORD))
+
+
 def load_storage():
     default_storage = {'users': {}}
     if not os.path.exists(DATA_FILE):
@@ -863,7 +889,11 @@ def login():
                 return start_user_session(user)
             record_login_failure(attempt_key)
             flash('Invalid credentials')
-    return render_template('login.html', initial_theme=get_preferred_theme()), status
+    return render_template(
+        'login.html',
+        initial_theme=get_preferred_theme(),
+        default_admin_warning=uses_default_admin_password(),
+    ), status
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -892,6 +922,29 @@ def register():
         return redirect(url_for('login'))
 
     return render_template('register.html', initial_theme=get_preferred_theme())
+
+
+@app.route('/account/password', methods=['GET', 'POST'])
+def change_password():
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    username = get_username_from_session()
+    if request.method == 'POST':
+        current_password = request.form.get('current_password') or ''
+        new_password = request.form.get('new_password') or ''
+        confirm_password = request.form.get('confirm_password') or ''
+        user = get_user_by_username(username)
+        if not user or not check_password_hash(user['password_hash'], current_password):
+            flash('Current password is incorrect.')
+        elif len(new_password) < 8:
+            flash('New password must be at least 8 characters.')
+        elif new_password != confirm_password:
+            flash('New passwords do not match.')
+        else:
+            update_user_password(username, new_password)
+            flash('Password updated.')
+            return redirect(url_for('chat'))
+    return render_template('password.html', initial_theme=get_preferred_theme(), username=username)
 
 
 @app.route('/chat')
@@ -1446,6 +1499,9 @@ def search_messages():
 
 def main():
     init_user_db()
+    if uses_default_admin_password():
+        print(f'Warning: the "{DEFAULT_ADMIN_USERNAME}" account still uses the published default password.')
+        print('Sign in and change it at /account/password.')
     parser = argparse.ArgumentParser(description='Run Court locally.')
     parser.add_argument(
         '--host',
