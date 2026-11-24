@@ -10,7 +10,7 @@ import time
 import secrets
 import markdown
 import nh3
-from datetime import datetime
+from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -82,6 +82,15 @@ def load_or_create_secret_key(path):
 
 app.secret_key = load_or_create_secret_key(SECRET_KEY_FILE)
 
+# Cookie hardening. HttpOnly keeps the signed chat session away from page script,
+# Lax stops cross-site form posts from riding an existing session, and the
+# lifetime bounds how long an abandoned sign-in stays valid.
+SESSION_LIFETIME = timedelta(days=7)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    PERMANENT_SESSION_LIFETIME=SESSION_LIFETIME,
+)
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
@@ -659,6 +668,7 @@ def login():
         if user and check_password_hash(user['password_hash'], password):
             _login_failures.pop(attempt_key, None)
             session.clear()
+            session.permanent = True
             session['logged_in'] = True
             session['user_id'] = user['id']
             session['username'] = user['username']
