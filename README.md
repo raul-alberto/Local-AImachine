@@ -256,4 +256,16 @@ To create a local Windows package and installer:
 - Access FAQs for more information
 - AI responses render Markdown with syntax-highlighted code and a copy button
 
+### Reset a forgotten password
+
+Court cannot email a reset link, so set a new password from the terminal on the
+machine running it:
+
+```bash
+python app.py --reset-password <username>
+```
+
+It prompts for the new password twice, so it never appears in your shell
+history, and signs out any sessions already open for that account.
+
 Enjoy your creative AI companion!

@@ -1,5 +1,7 @@
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash, make_response, Response, stream_with_context
 import argparse
+import getpass
+import sys
 import requests
 import os
 import json
@@ -521,6 +523,7 @@ def update_user_password(username, password):
 # Credentials older installs were seeded with and are published in the docs.
 DEFAULT_ADMIN_USERNAME = 'admin'
 DEFAULT_ADMIN_PASSWORD = 'admin123'
+MIN_PASSWORD_LENGTH = 8
 
 
 @cache
@@ -1030,8 +1033,8 @@ def register():
         if len(username) < 3:
             flash('Username must be at least 3 characters.')
             return render_template('register.html', initial_theme=get_preferred_theme())
-        if len(password) < 8:
-            flash('Password must be at least 8 characters.')
+        if len(password) < MIN_PASSWORD_LENGTH:
+            flash(f'Password must be at least {MIN_PASSWORD_LENGTH} characters.')
             return render_template('register.html', initial_theme=get_preferred_theme())
         if password != confirm_password:
             flash('Passwords do not match.')
@@ -1059,8 +1062,8 @@ def change_password():
         user = get_user_by_username(username)
         if not user or not check_password_hash(user['password_hash'], current_password):
             flash('Current password is incorrect.')
-        elif len(new_password) < 8:
-            flash('New password must be at least 8 characters.')
+        elif len(new_password) < MIN_PASSWORD_LENGTH:
+            flash(f'New password must be at least {MIN_PASSWORD_LENGTH} characters.')
         elif new_password != confirm_password:
             flash('New passwords do not match.')
         else:
@@ -1654,11 +1657,29 @@ def search_messages():
     return jsonify({'results': results})
 
 
+def reset_user_password(username):
+    """Set a new password from the terminal and end that user's sessions.
+
+    Prompts instead of taking the password as an argument so it stays out of
+    the shell history.
+    """
+    if not get_user_by_username(username):
+        print(f'No account named "{username}".', file=sys.stderr)
+        return 1
+    password = getpass.getpass('New password: ')
+    if len(password) < MIN_PASSWORD_LENGTH:
+        print(f'Password must be at least {MIN_PASSWORD_LENGTH} characters.', file=sys.stderr)
+        return 1
+    if password != getpass.getpass('Repeat new password: '):
+        print('Passwords do not match.', file=sys.stderr)
+        return 1
+    update_user_password(username, password)
+    print(f'Password updated for "{username}". Any sessions already signed in were ended.')
+    return 0
+
+
 def main():
     init_user_db()
-    if uses_default_admin_password():
-        print(f'Warning: the "{DEFAULT_ADMIN_USERNAME}" account still uses the published default password.')
-        print('Sign in and change it at /account/password.')
     parser = argparse.ArgumentParser(description='Run Court locally.')
     parser.add_argument(
         '--host', default=os.environ.get('COURT_HOST', '127.0.0.1'),
@@ -1672,7 +1693,16 @@ def main():
         '--lan', action='store_true',
         help='listen on all interfaces so other devices on your network can connect',
     )
+    parser.add_argument(
+        '--reset-password', metavar='USERNAME',
+        help='set a new password for an existing account, then exit',
+    )
     args = parser.parse_args()
+    if args.reset_password:
+        sys.exit(reset_user_password(args.reset_password))
+    if uses_default_admin_password():
+        print(f'Warning: the "{DEFAULT_ADMIN_USERNAME}" account still uses the published default password.')
+        print('Sign in and change it at /account/password.')
     host = '0.0.0.0' if args.lan else args.host
     if host not in ('127.0.0.1', 'localhost', '::1'):
         print(f'Court is listening on {host}:{args.port}. Anyone who can reach that address can open the login page.')
