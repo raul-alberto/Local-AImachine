@@ -11,6 +11,7 @@ import time
 import markdown
 import nh3
 from datetime import datetime, timedelta
+from html import unescape
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -107,6 +108,10 @@ DEFAULT_SYSTEM_PROMPT = (
     "'as an AI', or any variation of that. Give the user exactly what they asked for, clearly and concisely. "
     "Format code or tables when relevant."
 )
+
+# Roughly 1200 tokens of prior conversation: enough for follow-ups to make
+# sense without crowding out the system prompt, RAG context or the reply.
+HISTORY_TOKEN_BUDGET = 1200
 
 DEFAULT_GENERATION_SETTINGS = {
     'preset': 'balanced',
@@ -677,6 +682,54 @@ def normalize_chats(chats):
     return normalized_chats
 
 
+def estimate_tokens(text):
+    """Approximate the model's token count; Ollama does not expose a tokenizer."""
+    return math.ceil(len(text) / 4)
+
+
+def format_history_for_prompt(messages, token_budget=HISTORY_TOKEN_BUDGET):
+    """Render recent turns oldest-first, dropping the oldest that do not fit.
+
+    Walks backwards so the newest exchange is always kept, then reverses: a
+    turn is either sent whole or left out, so the model never sees a reply
+    without the question it answered.
+    """
+    lines = []
+    used = 0
+    for message in reversed(messages or []):
+        role = 'User' if message.get('type') == 'user' else 'Assistant'
+        text = message.get('message', '')
+        if not isinstance(text, str):
+            continue
+        if role == 'Assistant':
+            # Stored replies are sanitized HTML; the model wants plain text.
+            text = unescape(re.sub(r'<[^>]+>', ' ', text))
+        text = re.sub(r'\s+', ' ', text).strip()
+        if not text:
+            continue
+        line = f'{role}: {text}'
+        cost = estimate_tokens(line) + 1
+        if used + cost > token_budget:
+            break
+        lines.append(line)
+        used += cost
+    lines.reverse()
+    return '\n'.join(lines)
+
+
+def build_chat_prompt(system_prompt, history, user_message, rag_context=''):
+    """Assemble the prompt: system, optional local context, history, new message."""
+    parts = [f'System: {system_prompt}']
+    if rag_context:
+        parts.append('When useful, use the Local Context and cite source IDs like [1].')
+        parts.append(f'Local Context:\n{rag_context}')
+    if history:
+        parts.append(f'Conversation so far:\n{history}')
+    parts.append(f'User: {user_message}')
+    parts.append('Assistant:')
+    return '\n\n'.join(parts)
+
+
 def build_ollama_payload(prompt_payload, generation_settings, stream):
     settings = _apply_preset(_coerce_generation_settings(generation_settings))
     return {
@@ -918,15 +971,10 @@ def api_chat():
     system_prompt = session.get('system_prompt', DEFAULT_SYSTEM_PROMPT)
     generation_settings = _coerce_generation_settings(session.get('generation_settings', DEFAULT_GENERATION_SETTINGS))
     rag_context, rag_sources = build_rag_context(username, user_message)
-    if rag_context:
-        prompt_payload = (
-            f"System: {system_prompt}\n"
-            "When useful, use the Local Context and cite source IDs like [1].\n\n"
-            f"Local Context:\n{rag_context}\n\n"
-            f"User: {user_message}\nAssistant:"
-        )
-    else:
-        prompt_payload = f"System: {system_prompt}\n\nUser: {user_message}\nAssistant:"
+    # The current message is already in the list; send it separately as the prompt
+    # tail so the model always ends on the question it is answering.
+    history = format_history_for_prompt(chats[current_index]['messages'][:-1])
+    prompt_payload = build_chat_prompt(system_prompt, history, user_message, rag_context)
     payload = build_ollama_payload(prompt_payload, generation_settings, stream=False)
     try:
         response = requests.post(OLLAMA_URL, json=payload, timeout=120)
@@ -969,15 +1017,8 @@ def api_chat_stream():
     system_prompt = session.get('system_prompt', DEFAULT_SYSTEM_PROMPT)
     generation_settings = _coerce_generation_settings(session.get('generation_settings', DEFAULT_GENERATION_SETTINGS))
     rag_context, rag_sources = build_rag_context(username, user_message)
-    if rag_context:
-        prompt_payload = (
-            f"System: {system_prompt}\n"
-            "When useful, use the Local Context and cite source IDs like [1].\n\n"
-            f"Local Context:\n{rag_context}\n\n"
-            f"User: {user_message}\nAssistant:"
-        )
-    else:
-        prompt_payload = f"System: {system_prompt}\n\nUser: {user_message}\nAssistant:"
+    history = format_history_for_prompt(chats[current_index]['messages'][:-1])
+    prompt_payload = build_chat_prompt(system_prompt, history, user_message, rag_context)
     payload = build_ollama_payload(prompt_payload, generation_settings, stream=True)
 
     @stream_with_context
