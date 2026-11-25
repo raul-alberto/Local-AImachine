@@ -291,6 +291,10 @@
               </div>
             </div>
             <div class="grid-3 stack-top">
+                <label class="check-row stack-top">
+              <input type="checkbox" id="thinking-enabled" />
+              Let the model think before answering (slower, uses up Max tokens)
+                </label>
               <div class="field">
                 <label for="temperature"
                   >Temperature
@@ -684,6 +688,7 @@
         const topPInput = document.getElementById('top-p');
         const topKInput = document.getElementById('top-k');
         const maxTokensInput = document.getElementById('max-tokens');
+        const thinkingInput = document.getElementById('thinking-enabled');
         const temperatureValue = document.getElementById('temperature-value');
         const topPValue = document.getElementById('top-p-value');
         const topKValue = document.getElementById('top-k-value');
@@ -737,6 +742,7 @@
         }
 
         function hydrateSettingsUI() {
+          thinkingInput.checked = generationSettings.thinking === true;
           presetSelect.value = generationSettings.preset || 'balanced';
           temperatureInput.value = generationSettings.temperature ?? 0.7;
           topPInput.value = generationSettings.top_p ?? 0.9;
@@ -1170,6 +1176,7 @@
       saveSettingsButton.addEventListener('click', async () => {
           const promptText = systemPromptInput.value.trim();
           const generationPayload = {
+            thinking: thinkingInput.checked,
             preset: presetSelect.value,
             temperature: Number(temperatureInput.value),
             top_p: Number(topPInput.value),
@@ -1207,6 +1214,7 @@
       });
 
       resetSystemPromptButton.addEventListener('click', () => {
+          thinkingInput.checked = false;
           systemPromptInput.value = defaultSystemPrompt;
           applyPreset('balanced');
           maxTokensInput.value = 1024;
@@ -1284,6 +1292,7 @@
         });
 
         wipeLocalDataButton.addEventListener('click', async () => {
+          thinkingInput.checked = false;
           const confirmed = window.confirm('This will wipe chats, indexed docs, and reset settings for this account. Continue?');
           if (!confirmed) return;
           const response = await fetch('/api/privacy/wipe', { method: 'POST' });

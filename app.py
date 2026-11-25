@@ -286,6 +286,7 @@ DEFAULT_GENERATION_SETTINGS = {
     'top_p': 0.9,
     'top_k': 40,
     'max_tokens': 1024,
+    'thinking': False,
 }
 
 PRESET_VALUES = {
@@ -533,6 +534,7 @@ def _coerce_generation_settings(settings):
             merged[key] = int(settings.get(key, merged[key]))
         except (TypeError, ValueError):
             pass
+    merged['thinking'] = settings.get('thinking', merged['thinking']) is True
     merged['temperature'] = min(max(merged['temperature'], 0.0), 1.5)
     merged['top_p'] = min(max(merged['top_p'], 0.1), 1.0)
     merged['top_k'] = min(max(merged['top_k'], 1), 200)
@@ -1106,6 +1108,7 @@ def build_chat_prompt(system_prompt, history, user_message, rag_context=''):
 def build_ollama_payload(prompt_payload, generation_settings, stream, model_name=None):
     settings = _apply_preset(_coerce_generation_settings(generation_settings))
     return {
+        'think': settings['thinking'],
         'model': normalize_model_name(model_name) or MODEL,
         'prompt': prompt_payload,
         'stream': stream,
@@ -1629,7 +1632,7 @@ def api_chat_stream():
                     yield json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False) + '\n'
 
             if not ai_response_raw.strip():
-                raise RuntimeError('the model sent back no text (it may be a thinking-only model, or it failed to load)')
+                raise RuntimeError('the model sent back no text. If thinking is on, it may have used up Max tokens: raise it in Settings or turn thinking off')
 
             formatted_response = format_ai_response(ai_response_raw)
 

@@ -352,7 +352,8 @@ def test_chat_still_sends_the_stored_model_when_ollama_is_offline(db, monkeypatc
 
 def test_payload_uses_the_given_model_and_falls_back_otherwise(db):
     settings = dict(court.DEFAULT_GENERATION_SETTINGS)
-
+    assert court.build_ollama_payload('prompt', settings, True)['think'] is False
+    assert court.build_ollama_payload('prompt', dict(settings, thinking=True), True)['think'] is True
     assert court.build_ollama_payload('prompt', settings, False)['model'] == court.MODEL
     assert court.build_ollama_payload(
         'prompt', settings, False, 'qwen2.5:7b',
