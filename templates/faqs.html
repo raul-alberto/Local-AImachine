@@ -1,0 +1,140 @@
+<!doctype html>
+<html
+  lang="en"
+  {% if initial_theme and initial_theme != 'crimson' %}data-theme="{{ initial_theme }}"{% endif %}
+>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>FAQs - Court</title>
+    <link
+      rel="icon"
+      href="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+  </head>
+  <body>
+    <div class="doc-page">
+      <header class="doc-header">
+        <div class="doc-brand">
+          <img
+            src="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
+            alt="Court logo"
+            width="42"
+            height="42"
+          />
+          <div>
+            <h1>Court</h1>
+            <span>Help &amp; FAQs</span>
+          </div>
+        </div>
+        <nav class="doc-nav">
+          <a class="btn btn-ghost btn-sm" href="{{ url_for('chat') }}"
+            >Back to chat</a
+          >
+          <a class="btn btn-ghost btn-sm" href="{{ url_for('logout') }}"
+            >Log out</a
+          >
+        </nav>
+      </header>
+
+      <section class="doc-hero">
+        <span class="eyebrow">About</span>
+        <h2>A private AI assistant that runs on your machine.</h2>
+        <p>
+          Court is a local, uncensored AI assistant for creative work, coding
+          and writing. It talks to Ollama on your own hardware, so prompts and
+          replies never leave your computer.
+        </p>
+        <p class="muted">Built by Nox.</p>
+      </section>
+
+      <div class="faq-list">
+        <details class="faq-item" open>
+          <summary>What is Court?</summary>
+          <p>
+            Court is an AI companion that helps with creative ideas, coding,
+            writing and more. It is designed to be useful and unfiltered for
+            local, personal work.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Is my data safe?</summary>
+          <p>
+            Yes. Court runs locally through Ollama and sends nothing to external
+            servers. Accounts, chats and indexed documents live on this machine,
+            and you can wipe them at any time from Settings.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>How do I use it?</summary>
+          <p>
+            Type your question in the composer at the bottom of the chat and
+            press Enter. Replies stream in as they are generated, with code
+            blocks formatted and copyable. Use Stop to cancel a reply in
+            progress.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Can I start new conversations?</summary>
+          <p>
+            Yes. Use New chat in the sidebar. Each conversation is independent,
+            appears under Recent chats, and can be renamed, tagged or deleted
+            from its ⋯ menu.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>How does local document search work?</summary>
+          <p>
+            Open Settings and index text, code or PDF files under Local
+            knowledge. When retrieval is enabled, Court pulls the most relevant
+            passages into the prompt and cites them under each answer with View
+            sources.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>What does ephemeral mode mean?</summary>
+          <p>
+            In Ephemeral privacy mode, chats are deleted from this device when
+            you log out. Persistent mode keeps them for your account on this
+            device.
+          </p>
+        </details>
+      </div>
+
+      <footer class="doc-footer">
+        Court is local software — responses come from the model installed on
+        your machine and can be inaccurate.
+      </footer>
+    </div>
+
+    <script>
+      (() => {
+        const allowed = ['crimson', 'purple', 'pink', 'black', 'blue', 'emerald', 'orange'];
+        let theme = '{{ initial_theme|default("crimson") }}';
+        try {
+          theme = localStorage.getItem('court_theme') || theme;
+        } catch (error) {
+          /* storage may be unavailable in private browsing */
+        }
+        if (allowed.includes(theme) && theme !== 'crimson') {
+          document.documentElement.setAttribute('data-theme', theme);
+        }
+        try {
+          localStorage.setItem('court_theme', theme);
+        } catch (error) {
+          /* ignore */
+        }
+      })();
+    </script>
+  </body>
+</html>

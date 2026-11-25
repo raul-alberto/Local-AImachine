@@ -1,0 +1,1628 @@
+<!doctype html>
+<html
+  lang="en"
+  {% if initial_theme and initial_theme != 'crimson' %}data-theme="{{ initial_theme }}"{% endif %}
+>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Court Chat</title>
+    <link
+      rel="icon"
+      href="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
+    />
+    <!-- Vendor theme first: style.css must override its padding/background on our code blocks. -->
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='vendor/highlight.css') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+  </head>
+  <body class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <img
+          class="brand-logo"
+          src="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
+          alt="Court logo"
+          width="40"
+          height="40"
+        />
+        <div class="brand-text">
+          <h1>{{ profile.assistant_name }}</h1>
+          <span>Local AI</span>
+        </div>
+        <button
+          type="button"
+          class="icon-btn sidebar-close"
+          id="sidebar-close"
+          aria-label="Close menu"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div class="sidebar-actions">
+        <button id="new-chat" class="btn btn-primary btn-block" type="button">
+          + New chat
+        </button>
+        <div class="search-field">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m20 20-3.6-3.6"></path>
+          </svg>
+          <input
+            type="text"
+            id="search-input"
+            class="input"
+            placeholder="Search messages"
+            aria-label="Search messages"
+          />
+        </div>
+        <input
+          type="file"
+          id="import-file"
+          class="hidden"
+          accept="application/json"
+        />
+      </div>
+
+      <div class="section-label">Recent chats</div>
+      <nav id="chat-history" class="chat-list" aria-label="Chat history"></nav>
+
+      <div class="sidebar-footer">
+        <button id="open-settings" class="btn btn-ghost btn-block" type="button">
+          Settings
+        </button>
+        <div class="sidebar-io">
+          <button id="export-chat" class="btn btn-ghost" type="button">
+            Export
+          </button>
+          <button id="export-all" class="btn btn-ghost" type="button">
+            Export all
+          </button>
+          <button id="import-chat" class="btn btn-ghost" type="button">
+            Import
+          </button>
+        </div>
+        <div class="sidebar-links">
+          <a href="{{ url_for('faqs') }}">FAQs</a>
+          <a href="{{ url_for('logout') }}">Log out</a>
+        </div>
+        <div class="sidebar-user">
+          <span class="avatar-initial"
+            >{{ (display_name or username or 'U')[0]|upper }}</span
+          >
+          <div class="sidebar-user-text">
+            <strong>{{ display_name }}</strong>
+            <span>@{{ username }}</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+    <div class="main">
+
+      <header class="topbar">
+        <button
+          type="button"
+          class="icon-btn topbar-toggle"
+          id="sidebar-toggle"
+          aria-label="Open menu"
+        >
+          ☰
+        </button>
+        <div class="topbar-title">
+          <strong>Chat</strong>
+          <select
+            id="model-select"
+            class="select model-select"
+            aria-label="Model that answers your messages"
+            title="Model that answers your messages"
+          >
+            <option value="{{ model_name }}" selected>{{ model_name }}</option>
+          </select>
+        </div>
+        <div class="topbar-right">
+          <span id="health-pill" class="pill">Checking local status…</span>
+          <a
+            class="icon-btn"
+            href="{{ url_for('faqs') }}"
+            title="FAQs"
+            aria-label="FAQs"
+            >?</a
+          >
+        </div>
+      </header>
+
+      <div class="workspace" id="workspace">
+        <section class="welcome" id="welcome">
+          <div class="welcome-top">
+            <img
+              class="welcome-mark"
+              src="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
+              alt=""
+              width="54"
+              height="54"
+            />
+            <div class="welcome-copy">
+              <span class="eyebrow">{{ profile.assistant_name }} · local</span>
+              <h2>What are we working on?</h2>
+              <p>
+                A private assistant running on your machine. Ask for code, a
+                draft, an explanation or a second opinion — nothing leaves this
+                computer.
+              </p>
+            </div>
+          </div>
+          <div class="welcome-meta">
+            <span class="pill pill--ok">Private</span>
+            <span class="pill">Offline</span>
+            <span class="pill">Built by {{ profile.creator_name }}</span>
+          </div>
+          <div class="prompt-grid">
+            <button
+              type="button"
+              class="prompt-card quick-button"
+              data-prompt="Help me write a secure Python script for scanning files locally."
+            >
+              <strong>Write a script</strong>
+              <span>Secure local file scanner</span>
+            </button>
+            <button
+              type="button"
+              class="prompt-card quick-button"
+              data-prompt="Explain step-by-step how malware analysis works in a Windows environment."
+            >
+              <strong>Explain something</strong>
+              <span>Windows malware analysis</span>
+            </button>
+            <button
+              type="button"
+              class="prompt-card quick-button"
+              data-prompt="Improve and format this code comment block for readability."
+            >
+              <strong>Refine my text</strong>
+              <span>Tighten a comment block</span>
+            </button>
+          </div>
+        </section>
+
+        <div id="settings-panel" class="panel hidden">
+          <div class="panel-head">
+            <div>
+              <h2>Settings</h2>
+              <p>Saved locally for @{{ username }}.</p>
+            </div>
+            <button
+              id="close-settings"
+              class="btn btn-ghost btn-sm"
+              type="button"
+            >
+              Close
+            </button>
+          </div>
+
+          <div class="panel-section">
+            <h3>Persona</h3>
+            <p class="hint">Names Court uses for itself and its creator.</p>
+            <div class="grid-3">
+              <div class="field">
+                <label for="assistant-name">Assistant name</label>
+                <input
+                  id="assistant-name"
+                  class="input"
+                  type="text"
+                  value="{{ profile.assistant_name }}"
+                />
+              </div>
+              <div class="field">
+                <label for="creator-name">Creator name</label>
+                <input
+                  id="creator-name"
+                  class="input"
+                  type="text"
+                  value="{{ profile.creator_name }}"
+                />
+              </div>
+              <div class="field">
+                <label for="theme-select">Theme</label>
+                <select id="theme-select" class="select">
+                  <option value="crimson">Crimson</option>
+                  <option value="purple">Purple</option>
+                  <option value="pink">Pink</option>
+                  <option value="black">Black</option>
+                  <option value="blue">Blue</option>
+                  <option value="emerald">Emerald</option>
+                  <option value="orange">Orange</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-section">
+            <h3>System prompt</h3>
+            <p class="hint">Sent with every message in this account.</p>
+            <textarea id="system-prompt" class="textarea" rows="5">{{ system_prompt }}</textarea>
+          </div>
+
+          <div class="panel-section">
+            <h3>Generation</h3>
+            <p class="hint">
+              Presets set sampling values; the sliders override them.
+            </p>
+            <div class="grid-3">
+              <div class="field">
+                <label for="preset-select">Preset</label>
+                <select id="preset-select" class="select">
+                  <option value="precise">Precise</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="creative">Creative</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="max-tokens">Max tokens</label>
+                <input
+                  id="max-tokens"
+                  class="input"
+                  type="number"
+                  min="64"
+                  max="4096"
+                />
+              </div>
+              <div class="field">
+                <label for="privacy-mode">Privacy mode</label>
+                <select id="privacy-mode" class="select">
+                  <option value="ephemeral">Ephemeral (cleared on logout)</option>
+                  <option value="persistent">Persistent (save chats)</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid-3 stack-top">
+              <div class="field">
+                <label for="temperature"
+                  >Temperature
+                  <span class="field-value" id="temperature-value"></span
+                ></label>
+                <input
+                  id="temperature"
+                  type="range"
+                  min="0"
+                  max="1.5"
+                  step="0.05"
+                />
+              </div>
+              <div class="field">
+                <label for="top-p"
+                  >Top P <span class="field-value" id="top-p-value"></span
+                ></label>
+                <input id="top-p" type="range" min="0.1" max="1" step="0.05" />
+              </div>
+              <div class="field">
+                <label for="top-k"
+                  >Top K <span class="field-value" id="top-k-value"></span
+                ></label>
+                <input id="top-k" type="range" min="1" max="200" step="1" />
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-section">
+            <h3>Local knowledge</h3>
+            <p class="hint">
+              Index files so Court can quote them and cite sources.
+            </p>
+            <label class="check-row">
+              <input type="checkbox" id="rag-enabled" />
+              Enable document retrieval in chat responses
+            </label>
+            <div class="row stack-top">
+              <input
+                id="rag-file"
+                type="file"
+                class="input file-input grow"
+                multiple
+                accept=".txt,.md,.py,.json,.csv,.html,.js,.css,.pdf"
+              />
+              <button id="rag-upload" class="btn btn-primary btn-sm" type="button">
+                Index files
+              </button>
+              <button id="rag-clear" class="btn btn-ghost btn-sm" type="button">
+                Clear
+              </button>
+            </div>
+            <div id="rag-drop-zone" class="drop-zone">
+              Drag and drop files here to index.
+            </div>
+            <p id="rag-status-text" class="status-line"></p>
+            <div id="rag-doc-list" class="doc-list"></div>
+          </div>
+
+          <div class="panel-actions">
+            <button id="save-settings" class="btn btn-primary" type="button">
+              Save settings
+            </button>
+            <button
+              id="reset-system-prompt"
+              class="btn btn-ghost"
+              type="button"
+            >
+              Reset prompt
+            </button>
+            <a class="btn btn-ghost" href="{{ url_for('change_password') }}">
+              Change password
+            </a>
+            <button id="wipe-local-data" class="btn btn-danger" type="button">
+              Wipe local data
+            </button>
+            <span class="panel-note">
+              Stored on this device only. Ephemeral chats clear when you log
+              out.
+            </span>
+          </div>
+        </div>
+
+        <div id="rag-debug-panel" class="panel panel--debug hidden">
+          <h3>Retrieved context</h3>
+          <div id="rag-debug-content"></div>
+        </div>
+
+        <div id="chat" class="chat-log"></div>
+
+        <div id="loading" class="loading">
+          <div class="ai-avatar"></div>
+          <div class="dots">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer-wrap">
+        <form id="chat-form" class="composer">
+          <input
+            type="text"
+            id="message"
+            placeholder="Message {{ profile.assistant_name }}…"
+            autocomplete="off"
+            aria-label="Message"
+          />
+          <button
+            id="stop-generate"
+            type="button"
+            class="btn btn-ghost btn-stop hidden"
+          >
+            Stop
+          </button>
+          <button
+            type="submit"
+            class="btn btn-primary btn-send"
+            aria-label="Send message"
+          >
+            ↑
+          </button>
+        </form>
+        <p class="composer-hint">
+          <kbd>Enter</kbd> to send · <kbd>Ctrl</kbd>+<kbd>N</kbd> new chat ·
+          <kbd>Ctrl</kbd>+<kbd>K</kbd> search · <kbd>Ctrl</kbd>+<kbd>,</kbd>
+          settings
+        </p>
+      </div>
+    </div>
+
+    <div id="search-results-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h2>Search results</h2>
+          <button
+            id="close-search"
+            type="button"
+            class="icon-btn"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <div id="search-results-container" class="modal-body"></div>
+      </div>
+    </div>
+
+    <div id="summary-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h2>Chat summary</h2>
+          <button
+            id="close-summary"
+            type="button"
+            class="icon-btn"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <div id="summary-content" class="modal-body"></div>
+      </div>
+    </div>
+
+    <div id="sources-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h2>Retrieved sources</h2>
+          <button
+            id="close-sources"
+            type="button"
+            class="icon-btn"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <div id="sources-content" class="modal-body"></div>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='vendor/highlight.min.js') }}"></script>
+    <script>
+      // Fallback only: the bundled library above provides the real hljs.
+      window.hljs = window.hljs || { highlightAll: () => {} };
+      let currentChatIndex = {{ current_chat_index }};
+      let chats = {{ chats|tojson }};
+      // Only the open chat arrives with messages; the rest load on demand.
+      const currentChat = {{ current_chat|tojson }};
+      if (currentChat && chats[currentChatIndex]) {
+          chats[currentChatIndex].messages = currentChat.messages;
+      }
+      const generationSettings = {{ generation_settings|tojson }};
+      const profileSettings = {{ profile|tojson }};
+      const initialRagStatus = {{ rag_status|tojson }};
+      const initialPrivacyMode = {{ privacy_mode|tojson }};
+      let activeChatController = null;
+      let activeStreamingTextDiv = null;
+      let activeStreamingBubble = null;
+      let streamedRawText = '';
+
+      const PRESETS = {
+          precise: { temperature: 0.3, top_p: 0.85, top_k: 30 },
+          balanced: { temperature: 0.7, top_p: 0.9, top_k: 40 },
+          creative: { temperature: 1.0, top_p: 0.95, top_k: 80 },
+      };
+
+      function updateChatHistory() {
+          const historyDiv = document.getElementById('chat-history');
+          historyDiv.replaceChildren();
+          chats.forEach((chat, index) => {
+              const item = document.createElement('div');
+              item.className = `chat-item ${index === currentChatIndex ? 'is-active' : ''}`;
+
+              const titleDiv = document.createElement('div');
+              titleDiv.className = 'chat-item-main';
+              titleDiv.onclick = () => loadChat(index);
+
+              const titleSpan = document.createElement('span');
+              titleSpan.className = 'chat-item-title';
+              titleSpan.textContent = chat.title || 'New Chat';
+              titleDiv.appendChild(titleSpan);
+
+              if (chat.tags && chat.tags.length > 0) {
+                  const tagsDiv = document.createElement('div');
+                  tagsDiv.className = 'chat-item-tags';
+                  chat.tags.forEach(tag => {
+                      const tagEl = document.createElement('span');
+                      tagEl.className = 'tag';
+                      tagEl.textContent = tag;
+                      tagEl.onclick = (e) => {
+                          e.stopPropagation();
+                          removeTag(index, tag);
+                      };
+                      tagsDiv.appendChild(tagEl);
+                  });
+                  titleDiv.appendChild(tagsDiv);
+              }
+
+              item.appendChild(titleDiv);
+
+              const actionWrapper = document.createElement('div');
+              actionWrapper.className = 'chat-item-actions';
+
+              const dotButton = document.createElement('button');
+              dotButton.type = 'button';
+              dotButton.className = 'chat-item-menu';
+              dotButton.setAttribute('aria-label', 'Chat actions');
+              dotButton.textContent = '⋯';
+              dotButton.onclick = (event) => {
+                  event.stopPropagation();
+                  toggleChatMenu(index);
+              };
+              actionWrapper.appendChild(dotButton);
+
+              const menu = document.createElement('div');
+              menu.className = 'chat-menu hidden';
+
+              const renameBtn = document.createElement('button');
+              renameBtn.type = 'button';
+              renameBtn.className = 'chat-menu-item';
+              renameBtn.textContent = 'Rename';
+              renameBtn.onclick = (event) => { event.stopPropagation(); openRenamePrompt(index); };
+              menu.appendChild(renameBtn);
+
+              const deleteBtn = document.createElement('button');
+              deleteBtn.type = 'button';
+              deleteBtn.className = 'chat-menu-item is-danger';
+              deleteBtn.textContent = 'Delete';
+              deleteBtn.onclick = (event) => { event.stopPropagation(); deleteChat(index); };
+              menu.appendChild(deleteBtn);
+
+              actionWrapper.appendChild(menu);
+              item.appendChild(actionWrapper);
+              historyDiv.appendChild(item);
+          });
+      }
+
+      function closeAllMenus() {
+          document.querySelectorAll('.chat-menu').forEach((menu) => {
+              menu.classList.add('hidden');
+          });
+      }
+
+      function toggleChatMenu(index) {
+          closeAllMenus();
+          const menus = document.querySelectorAll('.chat-menu');
+          if (menus[index]) {
+              menus[index].classList.toggle('hidden');
+          }
+      }
+
+      async function openRenamePrompt(index) {
+          const newTitle = window.prompt('Enter chat name', chats[index].title || 'New Chat');
+          if (!newTitle) return;
+          const response = await fetch(`/api/rename_chat/${index}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ title: newTitle })
+          });
+          const data = await response.json();
+          if (data.chats) {
+              chats = data.chats;
+              updateChatHistory();
+          }
+      }
+
+      async function deleteChat(index) {
+          const confirmed = window.confirm('Delete this chat?');
+          if (!confirmed) return;
+          const response = await fetch(`/api/delete_chat/${index}`, { method: 'POST' });
+          const data = await response.json();
+          if (data.chats) {
+              chats = data.chats;
+              currentChatIndex = data.current_index;
+              updateChatHistory();
+              renderChat();
+          }
+      }
+
+      async function loadChat(index) {
+          currentChatIndex = index;
+          const response = await fetch(`/api/load_chat/${index}`, { method: 'POST' });
+          const data = await response.json();
+          if (data.chat && chats[index]) {
+              chats[index].messages = data.chat.messages;
+          }
+          setSidebarOpen(false);
+          updateChatHistory();
+          renderChat();
+      }
+
+      async function ensureChatMessages(index) {
+          const chat = chats[index];
+          if (!chat || Array.isArray(chat.messages)) return;
+          const response = await fetch(`/api/load_chat/${index}`, { method: 'POST' });
+          const data = await response.json();
+          chat.messages = data.chat ? data.chat.messages : [];
+      }
+
+      function syncWelcome() {
+          const welcome = document.getElementById('welcome');
+          if (!welcome) return;
+          const chat = chats[currentChatIndex];
+          const messages = chat && Array.isArray(chat.messages) ? chat.messages : [];
+          const onlyGreeting = messages.length <= 1 && (!messages[0] || messages[0].type === 'ai');
+          welcome.classList.toggle('hidden', !onlyGreeting);
+      }
+
+      function setSidebarOpen(open) {
+          const sidebar = document.getElementById('sidebar');
+          const backdrop = document.getElementById('sidebar-backdrop');
+          if (!sidebar || !backdrop) return;
+          sidebar.classList.toggle('is-open', open);
+          backdrop.classList.toggle('is-open', open);
+      }
+
+      async function renderChat() {
+          const chatDiv = document.getElementById('chat');
+          chatDiv.replaceChildren();
+          if (currentChatIndex >= 0 && currentChatIndex < chats.length) {
+              await ensureChatMessages(currentChatIndex);
+              const chat = chats[currentChatIndex];
+              chat.messages.forEach(msg => {
+                  appendMessage(msg.message, msg.type, msg.sources || [], msg.type === 'ai');
+              });
+          }
+          syncWelcome();
+      }
+
+      const form = document.getElementById('chat-form');
+      const input = document.getElementById('message');
+      const loading = document.getElementById('loading');
+      const quickButtons = document.querySelectorAll('.quick-button');
+      const exportChatButton = document.getElementById('export-chat');
+      const exportAllButton = document.getElementById('export-all');
+      const importChatButton = document.getElementById('import-chat');
+      const importFileInput = document.getElementById('import-file');
+      const openSettingsButton = document.getElementById('open-settings');
+      const closeSettingsButton = document.getElementById('close-settings');
+      const saveSettingsButton = document.getElementById('save-settings');
+      const resetSystemPromptButton = document.getElementById('reset-system-prompt');
+      const settingsPanel = document.getElementById('settings-panel');
+      const systemPromptInput = document.getElementById('system-prompt');
+        const assistantNameInput = document.getElementById('assistant-name');
+        const creatorNameInput = document.getElementById('creator-name');
+        const presetSelect = document.getElementById('preset-select');
+        const temperatureInput = document.getElementById('temperature');
+        const topPInput = document.getElementById('top-p');
+        const topKInput = document.getElementById('top-k');
+        const maxTokensInput = document.getElementById('max-tokens');
+        const temperatureValue = document.getElementById('temperature-value');
+        const topPValue = document.getElementById('top-p-value');
+        const topKValue = document.getElementById('top-k-value');
+        const stopButton = document.getElementById('stop-generate');
+        const healthPill = document.getElementById('health-pill');
+        const modelSelect = document.getElementById('model-select');
+      const ragEnabledInput = document.getElementById('rag-enabled');
+      const ragFileInput = document.getElementById('rag-file');
+      const ragUploadButton = document.getElementById('rag-upload');
+      const ragClearButton = document.getElementById('rag-clear');
+        const ragDropZone = document.getElementById('rag-drop-zone');
+      const ragStatusText = document.getElementById('rag-status-text');
+      const ragDocList = document.getElementById('rag-doc-list');
+      const privacyModeInput = document.getElementById('privacy-mode');
+        const themeSelectInput = document.getElementById('theme-select');
+      const wipeLocalDataButton = document.getElementById('wipe-local-data');
+        const ragDebugPanel = document.getElementById('rag-debug-panel');
+        const ragDebugContent = document.getElementById('rag-debug-content');
+      const defaultSystemPrompt = {{ system_prompt|tojson }};
+        let droppedRagFiles = [];
+
+        const ALLOWED_THEMES = ['crimson', 'purple', 'pink', 'black', 'blue', 'emerald', 'orange'];
+
+        function applyTheme(themeName) {
+          const safeTheme = ALLOWED_THEMES.includes(themeName) ? themeName : 'crimson';
+          if (safeTheme === 'crimson') {
+            document.documentElement.removeAttribute('data-theme');
+          } else {
+            document.documentElement.setAttribute('data-theme', safeTheme);
+          }
+            try {
+              localStorage.setItem('court_theme', safeTheme);
+            } catch (error) {
+              // Ignore storage errors in restricted/private browsing contexts.
+            }
+        }
+
+        function syncSettingLabels() {
+          temperatureValue.textContent = Number(temperatureInput.value).toFixed(2);
+          topPValue.textContent = Number(topPInput.value).toFixed(2);
+          topKValue.textContent = topKInput.value;
+        }
+
+        function applyPreset(presetName) {
+          const preset = PRESETS[presetName];
+          if (!preset) return;
+          temperatureInput.value = preset.temperature;
+          topPInput.value = preset.top_p;
+          topKInput.value = preset.top_k;
+          syncSettingLabels();
+        }
+
+        function hydrateSettingsUI() {
+          presetSelect.value = generationSettings.preset || 'balanced';
+          temperatureInput.value = generationSettings.temperature ?? 0.7;
+          topPInput.value = generationSettings.top_p ?? 0.9;
+          topKInput.value = generationSettings.top_k ?? 40;
+          maxTokensInput.value = generationSettings.max_tokens ?? 1024;
+          assistantNameInput.value = profileSettings.assistant_name || 'Court';
+          creatorNameInput.value = profileSettings.creator_name || 'Nox';
+          themeSelectInput.value = profileSettings.theme || 'crimson';
+          ragEnabledInput.checked = initialRagStatus.enabled !== false;
+          privacyModeInput.value = initialPrivacyMode || 'ephemeral';
+          applyTheme(themeSelectInput.value);
+          syncSettingLabels();
+        }
+
+        function paintRagStatus(status) {
+          ragEnabledInput.checked = status.enabled !== false;
+          ragStatusText.textContent = `Status: ${status.enabled ? 'enabled' : 'disabled'} | Documents: ${status.doc_count || 0} | Chunks: ${status.chunk_count || 0}`;
+          renderRagDocumentList(status.documents || []);
+        }
+
+        function renderRagDocumentList(documents) {
+          ragDocList.replaceChildren();
+          if (!documents.length) {
+            const empty = document.createElement('p');
+            empty.className = 'status-line';
+            empty.textContent = 'No indexed documents yet.';
+            ragDocList.appendChild(empty);
+            return;
+          }
+          documents.forEach((doc) => {
+            const row = document.createElement('div');
+            row.className = 'doc-row';
+            const info = document.createElement('div');
+            const nameEl = document.createElement('div');
+            nameEl.className = 'doc-name';
+            nameEl.textContent = doc.name;
+            const metaEl = document.createElement('div');
+            metaEl.className = 'doc-meta';
+            metaEl.textContent = `${doc.chunks} chunks`;
+            info.append(nameEl, metaEl);
+            const actions = document.createElement('div');
+            actions.className = 'doc-actions';
+            const renameButton = document.createElement('button');
+            renameButton.type = 'button';
+            renameButton.className = 'btn btn-ghost btn-xs';
+            renameButton.textContent = 'Rename';
+            const deleteButton = document.createElement('button');
+            deleteButton.type = 'button';
+            deleteButton.className = 'btn btn-ghost btn-xs';
+            deleteButton.textContent = 'Delete';
+            actions.append(renameButton, deleteButton);
+            row.append(info, actions);
+            renameButton.addEventListener('click', async () => {
+              const updatedName = window.prompt('Rename document', doc.name);
+              if (!updatedName) return;
+              const response = await fetch(`/api/rag/rename/${doc.id}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: updatedName.trim() }),
+              });
+              const data = await response.json();
+              if (!response.ok || !data.success) {
+                alert(data.error || 'Unable to rename document.');
+                return;
+              }
+              paintRagStatus(data);
+            });
+            deleteButton.addEventListener('click', async () => {
+              const confirmed = window.confirm(`Delete ${doc.name}?`);
+              if (!confirmed) return;
+              const response = await fetch(`/api/rag/delete/${doc.id}`, { method: 'POST' });
+              const data = await response.json();
+              if (!response.ok || !data.success) {
+                alert(data.error || 'Unable to delete document.');
+                return;
+              }
+              paintRagStatus(data);
+            });
+            ragDocList.appendChild(row);
+          });
+        }
+
+        async function refreshRagStatus() {
+          try {
+            const response = await fetch('/api/rag/status');
+            if (!response.ok) return;
+            const data = await response.json();
+            if (data.success) {
+              paintRagStatus(data);
+            }
+          } catch (error) {
+            ragStatusText.textContent = 'Unable to load RAG status.';
+          }
+        }
+
+        async function refreshHealth() {
+          try {
+            const response = await fetch('/api/health');
+            if (!response.ok) return;
+            const data = await response.json();
+            if (data.ollama_available && data.model_installed) {
+              healthPill.className = 'pill pill--ok';
+              healthPill.textContent = 'Model ready';
+            } else if (data.ollama_available) {
+              healthPill.className = 'pill pill--warn';
+              healthPill.textContent = 'Model missing';
+            } else {
+              healthPill.className = 'pill pill--bad';
+              healthPill.textContent = 'Ollama offline';
+            }
+            if (data.ollama_available) {
+              refreshModels();
+            }
+          } catch (error) {
+                          healthPill.className = 'pill pill--bad';
+              healthPill.textContent = 'Health check unavailable';
+          }
+        }
+
+        let modelsLoaded = false;
+        let useNativeModelPicker = typeof modelSelect.showPicker !== 'function';
+
+        async function refreshModels({ preserveSelection = false, force = false } = {}) {
+          if (modelsLoaded && !force) return true;
+          try {
+            const response = await fetch('/api/models');
+            if (!response.ok) return false;
+            const data = await response.json();
+            const names = [...new Set((data.models || []).map((model) => model.name))];
+            // While opening the picker, keep whatever this window already uses
+            // (including a stale saved name) instead of snapping to the server.
+            const preferred = preserveSelection && modelSelect.value
+              ? modelSelect.value
+              : (data.selected || '');
+            if (preferred && !names.includes(preferred)) {
+              names.unshift(preferred);
+            }
+            if (data.selected && !names.includes(data.selected)) {
+              names.unshift(data.selected);
+            }
+            modelSelect.replaceChildren();
+            if (!names.length) {
+              const option = document.createElement('option');
+              option.value = '';
+              option.disabled = true;
+              option.selected = true;
+              option.textContent = data.ollama_available
+                ? 'No models installed'
+                : 'Ollama offline';
+              modelSelect.appendChild(option);
+            } else {
+              names.forEach((name) => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                modelSelect.appendChild(option);
+              });
+              modelSelect.value = names.includes(preferred) ? preferred : names[0];
+            }
+            // Retry while Ollama is offline or has nothing pulled yet.
+            modelsLoaded = names.length > 0;
+            return true;
+          } catch (error) {
+            // Keep the server-rendered choice until the next health check.
+            return false;
+          }
+        }
+
+        async function openModelPicker(event) {
+          if (!useNativeModelPicker) {
+            // Refresh first, then open the picker with the new list, so a model
+            // pulled since this page loaded shows up on the first click.
+            event.preventDefault();
+            await refreshModels({ preserveSelection: true, force: true });
+            try {
+              modelSelect.showPicker();
+            } catch (error) {
+              // The gesture was lost; let the next click open the native list.
+              useNativeModelPicker = true;
+            }
+            return;
+          }
+          refreshModels({ preserveSelection: true, force: true });
+        }
+
+        modelSelect.addEventListener('mousedown', openModelPicker);
+        modelSelect.addEventListener('focus', () => {
+          refreshModels({ preserveSelection: true });
+        });
+
+        modelSelect.addEventListener('change', async () => {
+          const chosen = modelSelect.value;
+          if (!chosen) return;
+          modelSelect.disabled = true;
+          try {
+            const response = await fetch('/api/model', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model: chosen }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.success) {
+              throw new Error(data.error || 'Unable to switch models.');
+            }
+            refreshHealth();
+          } catch (error) {
+            alert(error.message);
+            await refreshModels({ force: true });
+          } finally {
+            modelSelect.disabled = false;
+          }
+        });
+
+        function createStreamingBubble() {
+          const chat = document.getElementById('chat');
+          const bubble = document.createElement('div');
+          bubble.className = 'msg-row msg-row--ai';
+
+          const avatar = document.createElement('div');
+          avatar.className = 'ai-avatar flex-shrink-0';
+          bubble.appendChild(avatar);
+
+          const textDiv = document.createElement('div');
+          textDiv.className = 'msg-bubble msg-bubble--ai message-content is-streaming';
+          textDiv.style.whiteSpace = 'pre-wrap';
+          textDiv.textContent = '';
+          bubble.appendChild(textDiv);
+
+          chat.appendChild(bubble);
+          chat.scrollTop = chat.scrollHeight;
+          activeStreamingBubble = bubble;
+          activeStreamingTextDiv = textDiv;
+        }
+
+        function updateStreamingBubble(chunk) {
+          if (!activeStreamingTextDiv) createStreamingBubble();
+          streamedRawText += chunk;
+          activeStreamingTextDiv.textContent = streamedRawText;
+          const chat = document.getElementById('chat');
+          chat.scrollTop = chat.scrollHeight;
+        }
+
+        function finalizeStreamingBubble(finalHtml, sources) {
+          if (!activeStreamingTextDiv) {
+            appendMessage(finalHtml, 'ai', sources || [], true);
+            return;
+          }
+          activeStreamingTextDiv.style.whiteSpace = 'normal';
+          // Server-rendered Markdown from the stream's "done" packet, sanitized by
+          // sanitize_reply_html(); streamed chunks only ever went through textContent.
+          activeStreamingTextDiv.innerHTML = finalHtml;
+          attachSources(activeStreamingBubble, activeStreamingTextDiv, sources || []);
+          addCopyButtons();
+          hljs.highlightAll();
+        }
+
+        function clearStreamingState() {
+          activeChatController = null;
+          activeStreamingTextDiv = null;
+          activeStreamingBubble = null;
+          streamedRawText = '';
+          stopButton.classList.add('hidden');
+          loading.style.display = 'none';
+        }
+
+      form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const message = input.value.trim();
+          if (!message || activeChatController) return;
+          renderRagDebug([]);
+          input.value = '';
+          appendMessage(message, 'user');
+          document.getElementById('welcome').classList.add('hidden');
+          loading.style.display = 'flex';
+          stopButton.classList.remove('hidden');
+          const chatDiv = document.getElementById('chat');
+          chatDiv.scrollTop = chatDiv.scrollHeight;
+          activeChatController = new AbortController();
+
+          try {
+            const response = await fetch('/api/chat_stream', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ message }),
+              signal: activeChatController.signal,
+              });
+            if (!response.ok || !response.body) {
+              throw new Error('Unable to stream response.');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                if (!line.trim()) continue;
+                const packet = JSON.parse(line);
+                if (packet.type === 'context') {
+                  renderRagDebug(packet.sources || []);
+                } else if (packet.type === 'chunk') {
+                  updateStreamingBubble(packet.content || '');
+                } else if (packet.type === 'done') {
+                  finalizeStreamingBubble(packet.response || '', packet.sources || []);
+                  if (packet.chats) {
+                    chats = packet.chats;
+                    currentChatIndex = packet.current_index;
+                    updateChatHistory();
+                  }
+                } else if (packet.type === 'error') {
+                  // Server error text is not Markdown, so render it as plain text.
+                  appendMessage(packet.message || 'Error: Unable to get response', 'ai');
+                }
+              }
+              }
+          } catch (error) {
+            if (error.name === 'AbortError') {
+              if (streamedRawText && activeStreamingTextDiv) {
+                activeStreamingTextDiv.textContent += '\n\n[Generation stopped]';
+              } else {
+                appendMessage('Generation stopped.', 'ai');
+              }
+            } else {
+              appendMessage('Error: Unable to get response', 'ai');
+            }
+          } finally {
+            clearStreamingState();
+          }
+      });
+
+        stopButton.addEventListener('click', () => {
+          if (activeChatController) {
+            activeChatController.abort();
+          }
+        });
+
+      quickButtons.forEach(button => {
+          button.addEventListener('click', () => {
+              input.value = button.dataset.prompt;
+              input.focus();
+          });
+      });
+
+      document.getElementById('new-chat').addEventListener('click', async () => {
+          const response = await fetch('/api/new_chat', { method: 'POST' });
+          const data = await response.json();
+          if (data.chats) {
+              chats = data.chats;
+              currentChatIndex = data.current_index;
+              setSidebarOpen(false);
+              updateChatHistory();
+              renderChat();
+          }
+      });
+
+      exportChatButton.addEventListener('click', async () => {
+          if (currentChatIndex < 0 || currentChatIndex >= chats.length) {
+              alert('Select a chat first.');
+              return;
+          }
+          await ensureChatMessages(currentChatIndex);
+          const chat = chats[currentChatIndex];
+          const exportPayload = {
+              exported_at: new Date().toISOString(),
+              system_prompt: systemPromptInput.value.trim(),
+              chat: chat,
+          };
+          downloadJSON(exportPayload, `${chat.title || 'chat'}.json`);
+      });
+
+      exportAllButton.addEventListener('click', async () => {
+          const response = await fetch('/api/chats?full=1');
+          const data = await response.json();
+          const exportPayload = {
+              exported_at: new Date().toISOString(),
+              system_prompt: systemPromptInput.value.trim(),
+              chats: data.chats || [],
+          };
+            downloadJSON(exportPayload, 'court_chats.json');
+      });
+
+      importChatButton.addEventListener('click', () => {
+          importFileInput.click();
+      });
+
+      importFileInput.addEventListener('change', async (event) => {
+          const file = event.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = async () => {
+              try {
+                  const imported = JSON.parse(reader.result);
+                  const response = await fetch('/api/import_chats', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ imported_chats: imported }),
+                  });
+                  const data = await response.json();
+                  if (data.success) {
+                      chats = data.chats;
+                      currentChatIndex = data.current_index;
+                      updateChatHistory();
+                      renderChat();
+                      alert('Chats imported successfully.');
+                  } else {
+                      alert('Import failed: ' + (data.error || 'Invalid file.'));
+                  }
+              } catch (error) {
+                  alert('Import failed: invalid JSON file.');
+              } finally {
+                  importFileInput.value = '';
+              }
+          };
+          reader.readAsText(file);
+      });
+
+      openSettingsButton.addEventListener('click', () => {
+          settingsPanel.classList.toggle('hidden');
+      });
+
+      closeSettingsButton.addEventListener('click', () => {
+          settingsPanel.classList.add('hidden');
+      });
+
+      saveSettingsButton.addEventListener('click', async () => {
+          const promptText = systemPromptInput.value.trim();
+          const generationPayload = {
+            preset: presetSelect.value,
+            temperature: Number(temperatureInput.value),
+            top_p: Number(topPInput.value),
+            top_k: Number(topKInput.value),
+            max_tokens: Number(maxTokensInput.value),
+          };
+          const profilePayload = {
+            assistant_name: assistantNameInput.value.trim() || 'Court',
+            creator_name: creatorNameInput.value.trim() || 'Nox',
+            theme: themeSelectInput.value,
+          };
+          await fetch('/api/rag/toggle', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ enabled: ragEnabledInput.checked }),
+          });
+          const response = await fetch('/api/save_settings', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              system_prompt: promptText,
+              generation_settings: generationPayload,
+              profile: profilePayload,
+              privacy_mode: privacyModeInput.value,
+            }),
+          });
+          const data = await response.json();
+          if (data.success) {
+              applyTheme(themeSelectInput.value);
+              alert('Settings saved locally.');
+              refreshRagStatus();
+          } else {
+              alert('Unable to save settings.');
+          }
+      });
+
+      resetSystemPromptButton.addEventListener('click', () => {
+          systemPromptInput.value = defaultSystemPrompt;
+          applyPreset('balanced');
+          maxTokensInput.value = 1024;
+      });
+
+        ragUploadButton.addEventListener('click', async () => {
+          const selectedFiles = [
+            ...(ragFileInput.files ? Array.from(ragFileInput.files) : []),
+            ...droppedRagFiles,
+          ];
+          if (!selectedFiles.length) {
+            alert('Select one or more files to index first.');
+            return;
+          }
+
+          const formData = new FormData();
+          selectedFiles.forEach((file) => {
+            formData.append('files', file);
+          });
+
+          try {
+            ragUploadButton.disabled = true;
+            ragUploadButton.textContent = 'Indexing...';
+            const response = await fetch('/api/rag/upload', {
+              method: 'POST',
+              body: formData,
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+              throw new Error(data.error || 'Upload failed.');
+            }
+            const uploadedCount = (data.uploaded || []).length;
+            alert(`Indexed ${uploadedCount} file(s) into local knowledge.`);
+            ragFileInput.value = '';
+            droppedRagFiles = [];
+            ragDropZone.textContent = 'Drag and drop multiple files here to index.';
+            paintRagStatus(data);
+          } catch (error) {
+            alert(`RAG upload failed: ${error.message}`);
+          } finally {
+            ragUploadButton.disabled = false;
+            ragUploadButton.textContent = 'Index files';
+          }
+        });
+
+        ragDropZone.addEventListener('dragover', (event) => {
+          event.preventDefault();
+          ragDropZone.classList.add('is-drag');
+        });
+
+        ragDropZone.addEventListener('dragleave', () => {
+          ragDropZone.classList.remove('is-drag');
+        });
+
+        ragDropZone.addEventListener('drop', (event) => {
+          event.preventDefault();
+          ragDropZone.classList.remove('is-drag');
+          const files = Array.from(event.dataTransfer.files || []);
+          if (!files.length) return;
+          droppedRagFiles = files;
+          ragDropZone.textContent = `${files.length} file(s) ready to index.`;
+        });
+
+        ragClearButton.addEventListener('click', async () => {
+          const confirmed = window.confirm('Clear all indexed local knowledge for this user?');
+          if (!confirmed) return;
+          const response = await fetch('/api/rag/clear', { method: 'POST' });
+          const data = await response.json();
+          if (response.ok && data.success) {
+            paintRagStatus(data);
+            alert('Knowledge base cleared.');
+          } else {
+            alert('Unable to clear knowledge base.');
+          }
+        });
+
+        wipeLocalDataButton.addEventListener('click', async () => {
+          const confirmed = window.confirm('This will wipe chats, indexed docs, and reset settings for this account. Continue?');
+          if (!confirmed) return;
+          const response = await fetch('/api/privacy/wipe', { method: 'POST' });
+          const data = await response.json();
+          if (!response.ok || !data.success) {
+            alert(data.error || 'Unable to wipe local data.');
+            return;
+          }
+          chats = [];
+          currentChatIndex = -1;
+          updateChatHistory();
+          renderChat();
+          systemPromptInput.value = defaultSystemPrompt;
+          applyPreset('balanced');
+          maxTokensInput.value = 1024;
+          paintRagStatus({ enabled: true, doc_count: 0, chunk_count: 0, documents: [] });
+          alert('Local data wiped for this account.');
+        });
+
+        presetSelect.addEventListener('change', () => {
+          applyPreset(presetSelect.value);
+        });
+        themeSelectInput.addEventListener('change', () => {
+          applyTheme(themeSelectInput.value);
+        });
+        temperatureInput.addEventListener('input', syncSettingLabels);
+        topPInput.addEventListener('input', syncSettingLabels);
+        topKInput.addEventListener('input', syncSettingLabels);
+
+      function downloadJSON(data, filename) {
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = filename;
+          document.body.appendChild(anchor);
+          anchor.click();
+          document.body.removeChild(anchor);
+          URL.revokeObjectURL(url);
+      }
+
+      document.addEventListener('click', (event) => {
+          if (!event.target.closest('.chat-item')) {
+              closeAllMenus();
+          }
+      });
+
+        // asHtml must be opted into: anything not explicitly known to be
+        // server-rendered Markdown stays a text node.
+        function appendMessage(text, type, sources = [], asHtml = false) {
+          const chat = document.getElementById('chat');
+          const bubble = document.createElement('div');
+          const fromAi = type !== 'user';  // ai replies and error notices
+          bubble.className = `msg-row msg-row--${fromAi ? 'ai' : 'user'}`;
+          if (fromAi) {
+              const avatar = document.createElement('div');
+              avatar.className = 'ai-avatar flex-shrink-0';
+              bubble.appendChild(avatar);
+          }
+          const textDiv = document.createElement('div');
+          textDiv.className = `msg-bubble msg-bubble--${fromAi ? 'ai' : 'user'} message-content`;
+          if (asHtml) {
+              // Only server-rendered Markdown reaches innerHTML, and
+              // sanitize_reply_html() has already stripped scripts and handlers.
+              textDiv.innerHTML = text;
+          } else {
+              textDiv.textContent = text;
+          }
+          bubble.appendChild(textDiv);
+          attachSources(bubble, textDiv, sources);
+          chat.appendChild(bubble);
+          chat.scrollTop = chat.scrollHeight;
+          hljs.highlightAll();
+          addCopyButtons();
+      }
+
+          function attachSources(bubble, contentDiv, sources) {
+            if (!sources || !sources.length) return;
+            if (bubble.querySelector('.sources-button')) return;
+
+            const block = document.createElement('div');
+            block.className = 'message-sources';
+            const heading = document.createElement('p');
+            const headingLabel = document.createElement('strong');
+            headingLabel.textContent = 'Sources';
+            heading.appendChild(headingLabel);
+            const list = document.createElement('ul');
+            sources.forEach((source) => {
+              const item = document.createElement('li');
+              const label = document.createElement('strong');
+              label.textContent = `[${source.id}] ${source.source}`;
+              item.append(label, `: ${source.snippet}`);
+              list.appendChild(item);
+            });
+            block.append(heading, list);
+            contentDiv.appendChild(block);
+
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn btn-ghost btn-xs sources-button';
+            button.textContent = `View sources (${sources.length})`;
+            button.addEventListener('click', () => showSourcesModal(sources));
+            const holder = document.createElement('div');
+            holder.className = 'sources-holder';
+            holder.appendChild(button);
+            bubble.appendChild(holder);
+          }
+
+          function showSourcesModal(sources) {
+            const modal = document.getElementById('sources-modal');
+            const content = document.getElementById('sources-content');
+            content.replaceChildren();
+            sources.forEach((source) => {
+              const block = document.createElement('div');
+              block.className = 'source-item';
+                const label = document.createElement('strong');
+                label.textContent = `[${source.id}] ${source.source}`;
+                block.appendChild(label);
+                if (typeof source.score === 'number') {
+                  const scoreEl = document.createElement('span');
+                  scoreEl.className = 'source-score';
+                  scoreEl.textContent = `Relevance ${source.score.toFixed(4)}`;
+                  block.appendChild(scoreEl);
+                }
+                const snippet = document.createElement('p');
+                snippet.textContent = source.snippet;
+                block.appendChild(snippet);
+              content.appendChild(block);
+            });
+            modal.classList.remove('hidden');
+          }
+
+            function renderRagDebug(sources) {
+              if (!sources || !sources.length) {
+                ragDebugPanel.classList.add('hidden');
+                ragDebugContent.replaceChildren();
+                return;
+              }
+              ragDebugPanel.classList.remove('hidden');
+              ragDebugContent.replaceChildren();
+              sources.forEach((source) => {
+                const row = document.createElement('div');
+                row.className = 'debug-row';
+                const score = typeof source.score === 'number' ? source.score.toFixed(4) : 'n/a';
+                const label = document.createElement('strong');
+                label.textContent = `[${source.id}] ${source.source}`;
+                const scoreEl = document.createElement('span');
+                scoreEl.className = 'muted';
+                scoreEl.textContent = ` (score: ${score})`;
+                const snippet = document.createElement('span');
+                snippet.textContent = source.snippet;
+                row.append(label, scoreEl, document.createElement('br'), snippet);
+                ragDebugContent.appendChild(row);
+              });
+            }
+
+      function addCopyButtons() {
+          document.querySelectorAll('pre code').forEach((code) => {
+              const pre = code.closest('pre');
+              if (!pre || pre.querySelector('.copy-code-button')) return;
+              pre.style.position = 'relative';
+              const button = document.createElement('button');
+              button.type = 'button';
+              button.className = 'copy-code-button';
+              button.textContent = 'Copy';
+              button.addEventListener('click', () => {
+                  navigator.clipboard.writeText(code.textContent || '').then(() => {
+                      button.textContent = 'Copied';
+                      setTimeout(() => { button.textContent = 'Copy'; }, 1200);
+                  }).catch(() => {
+                      button.textContent = 'Fail';
+                      setTimeout(() => { button.textContent = 'Copy'; }, 1200);
+                  });
+              });
+              pre.appendChild(button);
+          });
+      }
+
+      // Define functions first
+      async function performSearch(query) {
+          if (!query.trim()) return;
+          const response = await fetch('/api/search_messages', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query })
+          });
+          const data = await response.json();
+          const resultsContainer = document.getElementById('search-results-container');
+          resultsContainer.replaceChildren();
+
+          if (data.results.length === 0) {
+              const empty = document.createElement('p');
+              empty.className = 'muted';
+              empty.textContent = 'No results found.';
+              resultsContainer.appendChild(empty);
+          } else {
+              data.results.forEach(result => {
+                  const item = document.createElement('div');
+                  item.className = 'search-result-item';
+                  const title = document.createElement('div');
+                  title.className = 'result-title';
+                  title.textContent = result.chat_title || 'New Chat';
+                  const preview = document.createElement('div');
+                  preview.className = 'result-preview';
+                  preview.textContent = result.message || '';
+                  item.append(title, preview);
+                  item.addEventListener('click', () => {
+                      loadChat(result.chat_index);
+                      document.getElementById('search-results-modal').classList.add('hidden');
+                      const chatDiv = document.getElementById('chat');
+                      setTimeout(() => {
+                          chatDiv.scrollTo({ behavior: 'smooth', top: 0 });
+                      }, 100);
+                  });
+                  resultsContainer.appendChild(item);
+              });
+          }
+          document.getElementById('search-results-modal').classList.remove('hidden');
+      }
+
+      async function showSummary(index) {
+          if (index < 0 || index >= chats.length) return;
+          const summaryModal = document.getElementById('summary-modal');
+          summaryModal.classList.remove('hidden');
+          document.getElementById('summary-content').textContent = 'Generating summary...';
+
+          const response = await fetch(`/api/summarize_chat/${index}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' }
+          });
+          const data = await response.json();
+          document.getElementById('summary-content').textContent = data.summary;
+      }
+
+      async function addTag(index) {
+          const tag = prompt('Enter tag name:');
+          if (!tag) return;
+          const response = await fetch(`/api/add_tag/${index}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ tag })
+          });
+          const data = await response.json();
+          if (data.chats) {
+              chats = data.chats;
+              updateChatHistory();
+          }
+      }
+
+      async function removeTag(index, tag) {
+          const response = await fetch(`/api/remove_tag/${index}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ tag })
+          });
+          const data = await response.json();
+          if (data.chats) {
+              chats = data.chats;
+              updateChatHistory();
+          }
+      }
+
+      // Search, Tags, Summaries, and Keyboard Shortcuts
+      const searchInput = document.getElementById('search-input');
+      const searchResultsModal = document.getElementById('search-results-modal');
+      const summaryModal = document.getElementById('summary-modal');
+      const sourcesModal = document.getElementById('sources-modal');
+      const closeSearchBtn = document.getElementById('close-search');
+      const closeSummaryBtn = document.getElementById('close-summary');
+      const closeSourcesBtn = document.getElementById('close-sources');
+
+      if (searchInput) {
+          searchInput.addEventListener('keyup', async (event) => {
+              if (event.key === 'Enter') {
+                  await performSearch(searchInput.value);
+              }
+          });
+      }
+
+      if (closeSearchBtn) {
+          closeSearchBtn.addEventListener('click', () => {
+              searchResultsModal.classList.add('hidden');
+          });
+      }
+
+      if (closeSummaryBtn) {
+          closeSummaryBtn.addEventListener('click', () => {
+              summaryModal.classList.add('hidden');
+          });
+      }
+
+        if (closeSourcesBtn) {
+          closeSourcesBtn.addEventListener('click', () => {
+            sourcesModal.classList.add('hidden');
+          });
+        }
+
+      // Keyboard shortcuts
+      document.addEventListener('keydown', (event) => {
+          if (event.ctrlKey || event.metaKey) {
+              if (event.key === 'k') {
+                  event.preventDefault();
+                  searchResultsModal.classList.add('hidden');
+                  searchInput.focus();
+              } else if (event.key === 'n') {
+                  event.preventDefault();
+                  document.getElementById('new-chat').click();
+              } else if (event.key === ',') {
+                  event.preventDefault();
+                  openSettingsButton.click();
+              }
+          }
+      });
+
+      // Sidebar drawer (small screens)
+      const sidebarToggleBtn = document.getElementById('sidebar-toggle');
+      const sidebarCloseBtn = document.getElementById('sidebar-close');
+      const sidebarBackdropEl = document.getElementById('sidebar-backdrop');
+      if (sidebarToggleBtn) {
+          sidebarToggleBtn.addEventListener('click', () => {
+              setSidebarOpen(!document.getElementById('sidebar').classList.contains('is-open'));
+          });
+      }
+      if (sidebarCloseBtn) {
+          sidebarCloseBtn.addEventListener('click', () => setSidebarOpen(false));
+      }
+      if (sidebarBackdropEl) {
+          sidebarBackdropEl.addEventListener('click', () => setSidebarOpen(false));
+      }
+
+      // Initialize
+      hydrateSettingsUI();
+      paintRagStatus(initialRagStatus || { enabled: true, doc_count: 0, chunk_count: 0 });
+      refreshRagStatus();
+      refreshModels();
+      refreshHealth();
+      setInterval(refreshHealth, 20000);
+      updateChatHistory();
+      renderChat();
+    </script>
+  </body>
+</html>

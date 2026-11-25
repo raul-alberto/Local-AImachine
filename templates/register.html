@@ -1,0 +1,143 @@
+<!doctype html>
+<html
+  lang="en"
+  {% if initial_theme and initial_theme != 'crimson' %}data-theme="{{ initial_theme }}"{% endif %}
+>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Create account - Court</title>
+    <link
+      rel="icon"
+      href="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell">
+      <aside class="auth-aside">
+        <span class="eyebrow">Local first</span>
+        <h2>An account that never <em>leaves</em> this device.</h2>
+        <p>
+          Accounts are stored in a local SQLite file with hashed passwords.
+          There is no server to sign up to and nothing to verify by email.
+        </p>
+        <ul class="feature-list">
+          <li>Passwords hashed and kept locally</li>
+          <li>Separate chat history per account</li>
+          <li>One click to wipe your local data</li>
+        </ul>
+      </aside>
+
+      <section class="auth-card">
+        <div class="auth-brand">
+          <img
+            src="{{ url_for('static', filename='images/bettenLocal.jpg') }}"
+            alt="Court logo"
+            width="44"
+            height="44"
+          />
+          <div>
+            <h1>Create your account</h1>
+            <p>Court stays local — your account does too</p>
+          </div>
+        </div>
+
+        <form method="post" class="auth-form">
+          <div class="field">
+            <label for="display_name">Display name</label>
+            <input
+              class="input"
+              type="text"
+              id="display_name"
+              name="display_name"
+              placeholder="How should Court address you?"
+              required
+              autocomplete="name"
+              autofocus
+            />
+          </div>
+
+          <div class="field">
+            <label for="username">Username</label>
+            <input
+              class="input"
+              type="text"
+              id="username"
+              name="username"
+              placeholder="At least 3 characters"
+              required
+              minlength="3"
+              autocomplete="username"
+            />
+          </div>
+
+          <div class="field">
+            <label for="password">Password</label>
+            <input
+              class="input"
+              type="password"
+              id="password"
+              name="password"
+              placeholder="At least 8 characters"
+              required
+              minlength="8"
+              autocomplete="new-password"
+            />
+          </div>
+
+          <div class="field">
+            <label for="confirm_password">Confirm password</label>
+            <input
+              class="input"
+              type="password"
+              id="confirm_password"
+              name="confirm_password"
+              placeholder="Repeat your password"
+              required
+              minlength="8"
+              autocomplete="new-password"
+            />
+          </div>
+
+          <button class="btn btn-primary btn-block" type="submit">
+            Create account
+          </button>
+        </form>
+
+        {% with messages = get_flashed_messages() %} {% if messages %}
+        <div class="auth-feedback">{{ messages[0] }}</div>
+        {% endif %} {% endwith %}
+
+        <div class="auth-foot">
+          Already registered?
+          <a href="{{ url_for('login') }}">Back to sign in</a>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const allowed = ['crimson', 'purple', 'pink', 'black', 'blue', 'emerald', 'orange'];
+        let theme = '{{ initial_theme|default("crimson") }}';
+        try {
+          theme = localStorage.getItem('court_theme') || theme;
+        } catch (error) {
+          /* storage may be unavailable in private browsing */
+        }
+        if (allowed.includes(theme) && theme !== 'crimson') {
+          document.documentElement.setAttribute('data-theme', theme);
+        }
+        try {
+          localStorage.setItem('court_theme', theme);
+        } catch (error) {
+          /* ignore */
+        }
+      })();
+    </script>
+  </body>
+</html>
